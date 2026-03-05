@@ -105,6 +105,7 @@ def build_app(
             mgr = MCPManager(
                 servers_cfg=mcp_servers_cfg,
                 startup_timeout_seconds=float(mcp_startup_timeout_seconds),
+                allow_partial_start=True,  # or pass from config
             )
             mgr.start_all()
             app.state.mcp_manager = mgr

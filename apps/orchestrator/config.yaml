@@ -11,15 +11,45 @@ mcp:
   servers:
     excel-mcp:
       base_url: "http://127.0.0.1:8101"
-      cmd: ["uvicorn", "Multi_agen.mcp_servers.excel_mcp.http_app:app", "--host", "127.0.0.1", "--port", "8101"]
+      cmd:
+        - "python"
+        - "-m"
+        - "uvicorn"
+        - "Multi_agen.mcp_servers.excel_mcp.http_app:app"
+        - "--host"
+        - "127.0.0.1"
+        - "--port"
+        - "8101"
+        - "--log-level"
+        - "debug"
 
     ocr-mcp:
       base_url: "http://127.0.0.1:8102"
-      cmd: ["uvicorn", "Multi_agen.mcp_servers.ocr_mcp.http_app:app", "--host", "127.0.0.1", "--port", "8102"]
+      cmd:
+        - "python"
+        - "-m"
+        - "uvicorn"
+        - "Multi_agen.mcp_servers.ocr_mcp.http_app:app"
+        - "--host"
+        - "127.0.0.1"
+        - "--port"
+        - "8102"
+        - "--log-level"
+        - "debug"
 
-    # mem0-mcp:  # disable until you create Multi_agen/mcp_servers/mem0_mcp/
+    # mem0-mcp:
     #   base_url: "http://127.0.0.1:8103"
-    #   cmd: ["uvicorn", "Multi_agen.mcp_servers.mem0_mcp.http_app:app", "--host", "127.0.0.1", "--port", "8103"]
+    #   cmd:
+    #     - "python"
+    #     - "-m"
+    #     - "uvicorn"
+    #     - "Multi_agen.mcp_servers.mem0_mcp.http_app:app"
+    #     - "--host"
+    #     - "127.0.0.1"
+    #     - "--port"
+    #     - "8103"
+    #     - "--log-level"
+    #     - "debug"
 
   available_capabilities:
     - "excel.list_sheets"

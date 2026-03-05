@@ -2,14 +2,13 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from ..server import ToolSpec
+from ..types import ToolSpec
 
 
 def tool_render_sheet_image(ocr_backend) -> ToolSpec:
     def handler(args: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
         workbook_path = args["workbook_path"]
         sheet_name = args["sheet_name"]
-        # backend returns dict: {image_path, width, height}
         return ocr_backend.render_sheet_image(workbook_path=workbook_path, sheet_name=sheet_name)
 
     return ToolSpec(
