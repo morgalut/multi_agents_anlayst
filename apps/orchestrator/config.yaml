@@ -1,0 +1,28 @@
+app:
+  host: "0.0.0.0"
+  port: 8000
+
+mcp:
+  servers:
+    excel-mcp:
+      base_url: "http://localhost:8101"
+    ocr-mcp:
+      base_url: "http://localhost:8102"
+    mem0-mcp:
+      base_url: "http://localhost:8103"
+
+  available_capabilities:
+    - "excel.list_sheets"
+    - "excel.read_sheet_range"
+    - "excel.find_text"
+    - "excel.column_index_to_letter"
+    - "excel.write_cells"
+    - "excel.detect_merged_cells"
+    - "excel.get_formulas"
+    - "ocr.render_sheet_image"
+    - "ocr.extract_text"
+    - "memory.get"
+    - "memory.put"
+
+llm:
+  enabled: true
