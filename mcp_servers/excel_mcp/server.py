@@ -1,24 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any, Dict, List
 
+from .types import ToolSpec
 from .tools.list_sheets import tool_list_sheets
 from .tools.read_range import tool_read_sheet_range
 from .tools.write_cells import tool_write_cells
 from .tools.merged_cells import tool_detect_merged_cells
 from .tools.formulas import tool_get_formulas
 from .tools.find_text import tool_find_text
-
-
-@dataclass(frozen=True, slots=True)
-class ToolSpec:
-    name: str
-    description: str
-    input_schema: Dict[str, Any]
-    output_schema: Dict[str, Any]
-    capabilities: List[str]
-    handler: Any  # callable(args, ctx) -> dict
 
 
 class ExcelMCPServer:

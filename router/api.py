@@ -1,11 +1,14 @@
+# Multi_agen/router/api.py
 from __future__ import annotations
 
 from dataclasses import asdict
+from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
 import time
 import logging
 
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from Multi_agen.packages.core import PipelineState, RunInput, ToolingState
@@ -24,6 +27,15 @@ from Multi_agen.packages.agents.schema_detector import MainSheetSchemaDetector
 from Multi_agen.packages.llm import LLMClient
 
 from .tool_router import ToolRouter, ToolRouterConfig
+
+# NEW: MCP process manager (auto-start servers)
+from Multi_agen.router.mcp_manager import MCPManager
+
+try:
+    # Python urllib error for the exact failure you're seeing
+    from urllib.error import URLError
+except Exception:  # pragma: no cover
+    URLError = Exception  # type: ignore
 
 
 # -----------------------------
@@ -61,18 +73,82 @@ def build_app(
     server_base_urls: Dict[str, str],
     available_capabilities: List[str],
     llm_config: Optional[Dict[str, Any]] = None,
+    # NEW: MCP auto-start parameters (wired from main.py)
+    mcp_servers_cfg: Optional[Dict[str, dict]] = None,
+    mcp_auto_start: bool = False,
+    mcp_startup_timeout_seconds: float = 20.0,
+    mcp_stop_on_shutdown: bool = True,
 ) -> FastAPI:
     """
     llm_config expected shape (from YAML):
       llm:
         enabled: true
     If llm_config is missing -> LLM disabled by default (safe).
+
+    Improvements:
+    - Optional MCP subprocess auto-start on app startup + stop on shutdown
+    - Converts MCP connection failures into a clean 503 JSON response (instead of raw 500 stack dump)
+    - Adds richer /health output
     """
 
     logger.info("Router API init servers=%s", list(server_base_urls.keys()))
 
-    app = FastAPI(title="Multi-Agent Excel Router", version="0.1.0")
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        app.state.mcp_manager = None
+
+        if mcp_auto_start and mcp_servers_cfg:
+            logger.info(
+                "MCP auto-start enabled. Spawning MCP servers: %s",
+                list(mcp_servers_cfg.keys()),
+            )
+            mgr = MCPManager(
+                servers_cfg=mcp_servers_cfg,
+                startup_timeout_seconds=float(mcp_startup_timeout_seconds),
+            )
+            mgr.start_all()
+            app.state.mcp_manager = mgr
+            logger.info("MCP servers ready")
+
+        try:
+            yield
+        finally:
+            mgr = getattr(app.state, "mcp_manager", None)
+            if mgr and mcp_stop_on_shutdown:
+                logger.info("Stopping MCP servers on shutdown")
+                mgr.stop_all()
+
+    app = FastAPI(
+        title="Multi-Agent Excel Router",
+        version="0.2.0",
+        lifespan=lifespan,
+    )
     router = APIRouter()
+
+    # -----------------------------
+    # Exception handlers (return 503 when MCP is down)
+    # -----------------------------
+    @app.exception_handler(URLError)
+    async def urlerror_handler(request: Request, exc: Exception):
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "MCP dependency unavailable",
+                "detail": str(exc),
+                "hint": "An MCP server is unreachable. Verify it is running and base_url host/port are correct.",
+            },
+        )
+
+    @app.exception_handler(ConnectionRefusedError)
+    async def connrefused_handler(request: Request, exc: Exception):
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "MCP connection refused",
+                "detail": str(exc),
+                "hint": "Nothing is listening on the configured MCP port. Start the MCP server or fix base_url/port.",
+            },
+        )
 
     # -----------------------------
     # Root endpoint
@@ -83,12 +159,19 @@ def build_app(
         return {"service": "multi-agent-router", "ok": True}
 
     # -----------------------------
-    # Health endpoint
+    # Health endpoint (improved)
     # -----------------------------
     @router.get("/health")
     def health() -> Dict[str, Any]:
         logger.info("Health requested")
-        return {"ok": True}
+        llm_enabled = bool((llm_config or {}).get("enabled", False)) if isinstance(llm_config, dict) else False
+        return {
+            "ok": True,
+            "mcp_servers": list(server_base_urls.keys()),
+            "capabilities_count": len(available_capabilities),
+            "llm_enabled": llm_enabled,
+            "mcp_auto_start": bool(mcp_auto_start),
+        }
 
     # -----------------------------
     # Capabilities endpoint
@@ -132,10 +215,8 @@ def build_app(
             # -----------------------------
             enabled = False
             if isinstance(llm_config, dict):
-                # default True only if llm section exists, but we still respect explicit enabled flag
                 enabled = bool(llm_config.get("enabled", True))
             else:
-                # if no llm section in config -> disabled (safe default)
                 enabled = False
 
             llm = None
@@ -218,7 +299,8 @@ def build_app(
             row_results: List[Dict[str, Any]] = []
             for rr in state.row_results:
                 d = asdict(rr)
-                d["classification"] = rr.classification  # may not be dataclass
+                # rr.classification may not be a dataclass field
+                d["classification"] = getattr(rr, "classification", None)
                 row_results.append(d)
 
             elapsed_ms = (time.perf_counter() - start_time) * 1000
@@ -232,6 +314,8 @@ def build_app(
             )
 
         except Exception:
+            # The exception handlers above will turn common MCP failures into 503.
+            # Any remaining exceptions are logged and re-raised.
             logger.exception("RUN failed run_id=%s workbook=%s", req.run_id, req.workbook_path)
             raise
 

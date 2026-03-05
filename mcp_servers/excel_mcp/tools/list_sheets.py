@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any, Dict
 
-from ..server import ToolSpec
+from ..types import ToolSpec
 
 
 def tool_list_sheets(workbook_provider) -> ToolSpec:

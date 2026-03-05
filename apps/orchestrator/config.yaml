@@ -3,13 +3,23 @@ app:
   port: 8000
 
 mcp:
+  auto_start: true
+  allow_partial_start: true
+  startup_timeout_seconds: 20
+  stop_on_shutdown: true
+
   servers:
     excel-mcp:
-      base_url: "http://localhost:8101"
+      base_url: "http://127.0.0.1:8101"
+      cmd: ["uvicorn", "Multi_agen.mcp_servers.excel_mcp.http_app:app", "--host", "127.0.0.1", "--port", "8101"]
+
     ocr-mcp:
-      base_url: "http://localhost:8102"
-    mem0-mcp:
-      base_url: "http://localhost:8103"
+      base_url: "http://127.0.0.1:8102"
+      cmd: ["uvicorn", "Multi_agen.mcp_servers.ocr_mcp.http_app:app", "--host", "127.0.0.1", "--port", "8102"]
+
+    # mem0-mcp:  # disable until you create Multi_agen/mcp_servers/mem0_mcp/
+    #   base_url: "http://127.0.0.1:8103"
+    #   cmd: ["uvicorn", "Multi_agen.mcp_servers.mem0_mcp.http_app:app", "--host", "127.0.0.1", "--port", "8103"]
 
   available_capabilities:
     - "excel.list_sheets"

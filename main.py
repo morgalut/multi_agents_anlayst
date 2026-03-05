@@ -33,21 +33,38 @@ def create_app():
     cfg = load_yaml(config_path)
     logger.info("Loaded config.yaml from %s", config_path)
 
-    # 3) Extract MCP server URLs (matches your YAML: mcp.servers.*.base_url)
-    servers = (cfg.get("mcp", {}) or {}).get("servers", {}) or {}
-    server_base_urls = {sid: info["base_url"] for sid, info in servers.items() if isinstance(info, dict) and "base_url" in info}
+    # 3) Extract MCP server configs
+    mcp_cfg = (cfg.get("mcp", {}) or {})
+    servers = (mcp_cfg.get("servers", {}) or {})
+
+    # 3a) base URLs map (for your existing Router usage)
+    server_base_urls = {
+        sid: info["base_url"]
+        for sid, info in servers.items()
+        if isinstance(info, dict) and "base_url" in info
+    }
 
     # 4) Capabilities (matches your YAML: mcp.available_capabilities)
-    available_capabilities = list((cfg.get("mcp", {}) or {}).get("available_capabilities", []) or [])
+    available_capabilities = list(mcp_cfg.get("available_capabilities", []) or [])
 
     # 5) LLM config (we only need enabled flag; Azure values come from .env)
     llm_config = cfg.get("llm", None)
 
-    # 6) Build the FastAPI app
+    # 6) MCP auto-start settings
+    auto_start = bool(mcp_cfg.get("auto_start", False))
+    startup_timeout_seconds = float(mcp_cfg.get("startup_timeout_seconds", 20))
+    stop_on_shutdown = bool(mcp_cfg.get("stop_on_shutdown", True))
+
+    # 7) Build the FastAPI app
     return build_app(
         server_base_urls=server_base_urls,
         available_capabilities=available_capabilities,
         llm_config=llm_config,
+        # NEW: pass full server configs so we can spawn MCP processes
+        mcp_servers_cfg=servers,
+        mcp_auto_start=auto_start,
+        mcp_startup_timeout_seconds=startup_timeout_seconds,
+        mcp_stop_on_shutdown=stop_on_shutdown,
     )
 
 
