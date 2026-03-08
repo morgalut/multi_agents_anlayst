@@ -13,14 +13,24 @@ def tool_read_sheet_range(workbook_provider) -> ToolSpec:
         nrows = int(args["nrows"])
         ncols = int(args["ncols"])
 
-        wb = workbook_provider.open(ctx["workbook_path"])
+        workbook_path = ctx.get("workbook_path", "")
+        if not workbook_path:
+            raise ValueError("Missing required context: workbook_path")
+
+        wb = workbook_provider.open(workbook_path)
+
+        if sheet_name not in wb.sheetnames:
+            available = ", ".join(repr(s) for s in wb.sheetnames[:20])
+            raise ValueError(
+                f"Worksheet {sheet_name!r} does not exist. Available sheets: {available}"
+            )
+
         ws = wb[sheet_name]
 
         grid: List[List[Any]] = []
         for r in range(row0, row0 + nrows):
             row_out: List[Any] = []
             for c in range(col0, col0 + ncols):
-                # openpyxl is 1-based for cell access
                 cell = ws.cell(row=r + 1, column=c + 1)
                 row_out.append(cell.value)
             grid.append(row_out)

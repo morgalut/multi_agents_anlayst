@@ -7,7 +7,10 @@ from ..types import ToolSpec
 
 def tool_render_sheet_image(ocr_backend) -> ToolSpec:
     def handler(args: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
-        workbook_path = args["workbook_path"]
+        workbook_path = args.get("workbook_path")
+
+        if not workbook_path:
+            raise ValueError("Missing required argument: workbook_path")
         sheet_name = args["sheet_name"]
         return ocr_backend.render_sheet_image(workbook_path=workbook_path, sheet_name=sheet_name)
 

@@ -12,17 +12,29 @@ from .logger import logger
 @dataclass(frozen=True, slots=True)
 class HttpMCPTransportConfig:
     timeout_seconds: float = 60.0
+    max_error_body_chars: int = 4000
 
 
 class HttpMCPTransport:
 
-    def __init__(self, server_base_urls: Dict[str, str], config: Optional[HttpMCPTransportConfig] = None):
+
+    def __init__(
+        self,
+        server_base_urls: Dict[str, str],
+        config: Optional[HttpMCPTransportConfig] = None,
+    ):
         self._base = dict(server_base_urls)
         self._cfg = config or HttpMCPTransportConfig()
 
-    def call_tool(self, server_id: str, tool_name: str, args: Dict[str, Any], ctx: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def call_tool(
+        self,
+        server_id: str,
+        tool_name: str,
+        args: Dict[str, Any],
+        ctx: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
 
-        logger.info(f"[MCP CALL] server={server_id} tool={tool_name}")
+        logger.info("[MCP CALL] server=%s tool=%s", server_id, tool_name)
 
         if server_id not in self._base:
             raise KeyError(f"Unknown server_id: {server_id}")
@@ -35,7 +47,7 @@ class HttpMCPTransport:
             "ctx": ctx or {},
         }
 
-        logger.debug(f"[MCP REQUEST] {payload}")
+        logger.debug("[MCP REQUEST] %s", payload)
 
         data = json.dumps(payload).encode("utf-8")
 
@@ -51,14 +63,31 @@ class HttpMCPTransport:
                 body = resp.read().decode("utf-8")
                 out = json.loads(body) if body else {}
 
-                logger.info(f"[MCP SUCCESS] tool={tool_name}")
-
+                logger.info("[MCP SUCCESS] tool=%s", tool_name)
                 return out
 
         except HTTPError as e:
-            logger.error(f"[MCP ERROR] HTTPError {e.code} tool={tool_name}")
+            body_text: Optional[str] = None
+            try:
+                raw = e.read()
+                if isinstance(raw, bytes):
+                    body_text = raw.decode("utf-8", errors="replace")
+                elif raw is not None:
+                    body_text = str(raw)
+                if body_text and len(body_text) > self._cfg.max_error_body_chars:
+                    body_text = body_text[: self._cfg.max_error_body_chars] + "...[truncated]"
+            except Exception:
+                body_text = None
+
+            logger.error("[MCP ERROR] HTTPError %s tool=%s body=%s", e.code, tool_name, body_text)
+
+            # FIX: Attach the already-read body onto the exception so that
+            # excel_client._read_http_error_body() can retrieve it without
+            # trying to read the now-exhausted stream a second time.
+            e._cached_body = body_text  # type: ignore[attr-defined]
+
             raise
 
         except URLError as e:
-            logger.error(f"[MCP ERROR] URLError tool={tool_name} error={e}")
+            logger.error("[MCP ERROR] URLError tool=%s error=%s", tool_name, e)
             raise
