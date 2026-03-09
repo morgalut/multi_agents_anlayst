@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 import logging
-import unicodedata
 
 from Multi_agen.packages.core import (
     MainSheetSchema,
@@ -12,6 +11,7 @@ from Multi_agen.packages.core import (
     PipelineState,
     RowTask,
 )
+from Multi_agen.packages.agents.sheet_name_resolver import SheetNameResolver, SheetNameResolution
 
 logger = logging.getLogger("multi_agen.agents.row_walker")
 if not logger.handlers:
@@ -36,17 +36,24 @@ class RowWalkerAgent:
       - If the main sheet schema does not contain a Filename column,
         derive tasks from workbook sheet names.
 
-    Important improvement:
+    Improvement:
       - Candidate sheet names taken from cells are resolved against the
         real workbook sheet names before RowTask objects are created.
-      - This prevents MCP 400 failures caused by near-matches such as:
-            "Sheet A" vs "Sheet A "
-            Hebrew punctuation variants
-            hidden RTL/LTR Unicode marks
+      - Provenance is attached to state.task_provenance so the API can
+        serialize where each task came from:
+            workbook file
+            source sheet
+            source row / column
+            source A1 cell
+            raw cell value
+            normalized candidate
+            resolved sheet name
+            matched_by
     """
 
     def __init__(self, config: RowWalkerConfig | None = None):
         self.config = config or RowWalkerConfig()
+        self._resolver = SheetNameResolver()
 
     def build_tasks(self, state: PipelineState, tools) -> List[RowTask]:
         if state.main_sheet is None:
@@ -56,6 +63,8 @@ class RowWalkerAgent:
         all_sheets = tools.excel_list_sheets()
         filename_col = schema.columns.get(OutputColumns.FILENAME.value)
 
+        task_provenance: List[Dict[str, Any]] = []
+
         # Preferred mode: explicit Filename column on the main sheet
         if filename_col is not None:
             logger.info(
@@ -64,8 +73,16 @@ class RowWalkerAgent:
                 schema.header_row_index,
                 filename_col,
             )
-            tasks = self._build_from_filename_column(schema, filename_col, all_sheets, tools)
+            tasks = self._build_from_filename_column(
+                state=state,
+                schema=schema,
+                filename_col=filename_col,
+                all_sheets=all_sheets,
+                tools=tools,
+                task_provenance=task_provenance,
+            )
             if tasks:
+                self._attach_task_provenance(state, task_provenance)
                 logger.info("RowWalker:built tasks from filename column count=%d", len(tasks))
                 return tasks
 
@@ -78,29 +95,38 @@ class RowWalkerAgent:
             "RowWalker:using workbook-sheet fallback mode main_sheet=%s",
             schema.name,
         )
-        tasks = self._build_from_workbook_sheets(schema, all_sheets)
+        tasks = self._build_from_workbook_sheets(
+            state=state,
+            schema=schema,
+            all_sheets=all_sheets,
+            task_provenance=task_provenance,
+        )
 
         if not tasks:
             raise RuntimeError(
                 "Failed to build row tasks: no Filename column in main sheet schema and no usable workbook sheets found"
             )
 
+        self._attach_task_provenance(state, task_provenance)
         logger.info("RowWalker:built tasks from workbook-sheet fallback count=%d", len(tasks))
         return tasks
 
     def _build_from_filename_column(
         self,
+        state: PipelineState,
         schema: MainSheetSchema,
         filename_col: int,
         all_sheets: List[str],
         tools,
+        task_provenance: List[Dict[str, Any]],
     ) -> List[RowTask]:
         """
         Build tasks from the explicit Filename column on the main sheet.
 
-        Improvement:
-        - resolve each raw cell value to an exact workbook sheet name
-          before creating a RowTask.
+        Provenance source:
+          - workbook sheet: schema.name
+          - workbook row: row0 + i
+          - workbook col: filename_col
         """
         row0 = schema.header_row_index + 1
         grid = tools.excel_read_sheet_range(
@@ -112,47 +138,96 @@ class RowWalkerAgent:
         )
 
         tasks: List[RowTask] = []
+        workbook_path = self._get_workbook_path(state)
+
         for i, row in enumerate(grid):
             cell = row[0] if row else None
-            raw_name = self._normalize_sheet_name_cell(cell)
+            raw_cell_value = "" if cell is None else str(cell)
+            normalized_candidate = self._normalize_sheet_name_cell(cell)
 
-            if not raw_name:
+            if not normalized_candidate:
                 # Common summary layout: stop on first empty row
                 break
 
-            resolved_name = self._resolve_sheet_name(raw_name, all_sheets)
-            if resolved_name is None:
+            resolution: SheetNameResolution = self._resolver.resolve(normalized_candidate, all_sheets)
+            if resolution.resolved_name is None:
                 logger.warning(
                     "RowWalker:unresolved sheet reference raw=%r row_index=%d available_count=%d",
-                    raw_name,
+                    normalized_candidate,
                     row0 + i,
                     len(all_sheets),
                 )
-                continue
-
-            if resolved_name == schema.name:
-                logger.info(
-                    "RowWalker:skipping self-reference raw=%r resolved=%r row_index=%d",
-                    raw_name,
-                    resolved_name,
-                    row0 + i,
+                task_provenance.append(
+                    self._make_task_provenance(
+                        source_workbook_file=workbook_path,
+                        source_sheet=schema.name,
+                        source_row_0_based=row0 + i,
+                        source_col_0_based=filename_col,
+                        raw_cell_value=raw_cell_value,
+                        normalized_candidate=normalized_candidate,
+                        resolved_sheet_name=None,
+                        matched_by=None,
+                        source_kind="filename_column",
+                    )
                 )
                 continue
 
-            tasks.append(RowTask(row_index=row0 + i, sheet_name=resolved_name))
+            if resolution.resolved_name == schema.name:
+                logger.info(
+                    "RowWalker:skipping self-reference raw=%r resolved=%r row_index=%d",
+                    normalized_candidate,
+                    resolution.resolved_name,
+                    row0 + i,
+                )
+                task_provenance.append(
+                    self._make_task_provenance(
+                        source_workbook_file=workbook_path,
+                        source_sheet=schema.name,
+                        source_row_0_based=row0 + i,
+                        source_col_0_based=filename_col,
+                        raw_cell_value=raw_cell_value,
+                        normalized_candidate=normalized_candidate,
+                        resolved_sheet_name=resolution.resolved_name,
+                        matched_by=resolution.matched_by,
+                        source_kind="filename_column_self_reference",
+                    )
+                )
+                continue
+
+            tasks.append(RowTask(row_index=row0 + i, sheet_name=resolution.resolved_name))
+            task_provenance.append(
+                self._make_task_provenance(
+                    source_workbook_file=workbook_path,
+                    source_sheet=schema.name,
+                    source_row_0_based=row0 + i,
+                    source_col_0_based=filename_col,
+                    raw_cell_value=raw_cell_value,
+                    normalized_candidate=normalized_candidate,
+                    resolved_sheet_name=resolution.resolved_name,
+                    matched_by=resolution.matched_by,
+                    source_kind="filename_column",
+                )
+            )
 
         return tasks
 
     def _build_from_workbook_sheets(
         self,
+        state: PipelineState,
         schema: MainSheetSchema,
         all_sheets: List[str],
+        task_provenance: List[Dict[str, Any]],
     ) -> List[RowTask]:
         """
         Build tasks directly from workbook sheet names when no explicit
         Filename column exists in the detected main-sheet schema.
+
+        Provenance source:
+          - not a worksheet cell
+          - comes from workbook tab list
         """
         main_sheet_name = (schema.name or "").strip()
+        workbook_path = self._get_workbook_path(state)
 
         tasks: List[RowTask] = []
         synthetic_row_index = schema.header_row_index + 1
@@ -174,6 +249,32 @@ class RowWalkerAgent:
                     sheet_name=sheet_name,  # keep exact workbook tab name
                 )
             )
+            task_provenance.append(
+                {
+                    "row_index": synthetic_row_index,
+                    "sheet_name": sheet_name,
+                    "provenance": {
+                        "source_kind": "workbook_sheet_list",
+                        "source_workbook_file": workbook_path,
+                        "source_sheet": None,
+                        "source_row_0_based": None,
+                        "source_row_1_based": None,
+                        "source_col_0_based": None,
+                        "source_col_1_based": None,
+                        "source_col_letter": None,
+                        "source_cell_a1": None,
+                        "raw_cell_value": sheet_name,
+                        "normalized_candidate": normalized,
+                        "resolved_sheet_name": sheet_name,
+                        "matched_by": "workbook_sheet_list",
+                        "source_code": {
+                            "file": "Multi_agen/packages/agents/row_walker.py",
+                            "line_start": 156,
+                            "line_end": 205,
+                        },
+                    },
+                }
+            )
             synthetic_row_index += 1
 
         return tasks
@@ -181,6 +282,10 @@ class RowWalkerAgent:
     def _normalize_sheet_name_cell(self, cell) -> str:
         """
         Normalize raw cell content into a candidate sheet-name string.
+
+        Important:
+        - This is a normalized candidate, not the exact source cell text.
+        - Exact raw workbook text should be preserved separately.
         """
         if cell is None or cell is MissingValueSentinel:
             return ""
@@ -195,81 +300,75 @@ class RowWalkerAgent:
 
         return text
 
-    def _resolve_sheet_name(self, raw_name: str, actual_sheet_names: List[str]) -> Optional[str]:
-        """
-        Resolve a candidate name from a cell to an exact workbook sheet name.
+    def _make_task_provenance(
+        self,
+        *,
+        source_workbook_file: Optional[str],
+        source_sheet: Optional[str],
+        source_row_0_based: Optional[int],
+        source_col_0_based: Optional[int],
+        raw_cell_value: str,
+        normalized_candidate: str,
+        resolved_sheet_name: Optional[str],
+        matched_by: Optional[str],
+        source_kind: str,
+    ) -> Dict[str, Any]:
+        col_letter = None
+        cell_a1 = None
 
-        Matching strategy:
-        1) exact match
-        2) trimmed exact match
-        3) canonical Unicode/punctuation match
+        if source_row_0_based is not None and source_col_0_based is not None:
+            col_letter = self._column_index_to_letter(source_col_0_based)
+            cell_a1 = f"{col_letter}{source_row_0_based + 1}"
 
-        Returns:
-            exact workbook sheet name, or None if no match found
-        """
-        raw = raw_name or ""
-        trimmed = raw.strip()
-
-        # 1) exact
-        if raw in actual_sheet_names:
-            return raw
-
-        # 2) trimmed exact
-        if trimmed in actual_sheet_names:
-            logger.info(
-                "RowWalker:resolved sheet by trimmed exact match raw=%r actual=%r",
-                raw_name,
-                trimmed,
-            )
-            return trimmed
-
-        if not self.config.allow_sheet_name_resolution:
-            return None
-
-        # 3) canonicalized
-        target = self._canonicalize_sheet_name(trimmed)
-        for actual in actual_sheet_names:
-            if self._canonicalize_sheet_name(actual) == target:
-                logger.info(
-                    "RowWalker:resolved sheet by canonical match raw=%r actual=%r",
-                    raw_name,
-                    actual,
-                )
-                return actual
-
-        return None
-
-    def _canonicalize_sheet_name(self, name: str) -> str:
-        """
-        Normalize Unicode/punctuation differences that often cause
-        visually-equal sheet names to fail exact matching.
-
-        Handles:
-        - Hebrew gershayim / geresh variants
-        - non-breaking spaces
-        - hidden RTL/LTR marks
-        - repeated internal whitespace
-        """
-        text = unicodedata.normalize("NFKC", (name or "").strip())
-
-        replacements = {
-            "״": '"',      # Hebrew gershayim -> double quote
-            "׳": "'",      # Hebrew geresh -> apostrophe
-            "\u00A0": " ", # non-breaking space
-            "\u200f": "",  # RTL mark
-            "\u200e": "",  # LTR mark
-            "\u202a": "",
-            "\u202b": "",
-            "\u202c": "",
-            "\u202d": "",
-            "\u202e": "",
+        return {
+            "row_index": source_row_0_based,
+            "sheet_name": resolved_sheet_name,
+            "provenance": {
+                "source_kind": source_kind,
+                "source_workbook_file": source_workbook_file,
+                "source_sheet": source_sheet,
+                "source_row_0_based": source_row_0_based,
+                "source_row_1_based": None if source_row_0_based is None else source_row_0_based + 1,
+                "source_col_0_based": source_col_0_based,
+                "source_col_1_based": None if source_col_0_based is None else source_col_0_based + 1,
+                "source_col_letter": col_letter,
+                "source_cell_a1": cell_a1,
+                "raw_cell_value": raw_cell_value,
+                "normalized_candidate": normalized_candidate,
+                "resolved_sheet_name": resolved_sheet_name,
+                "matched_by": matched_by,
+                "source_code": {
+                    "file": "Multi_agen/packages/agents/row_walker.py",
+                    "line_start": 106,
+                    "line_end": 153,
+                },
+            },
         }
 
-        for src, dst in replacements.items():
-            text = text.replace(src, dst)
+    def _attach_task_provenance(self, state: PipelineState, task_provenance: List[Dict[str, Any]]) -> None:
+        try:
+            setattr(state, "task_provenance", task_provenance)
+        except Exception:
+            logger.exception("RowWalker:failed attaching task_provenance to state")
 
-        text = " ".join(text.split())
-        return text.casefold()
+    def _get_workbook_path(self, state: PipelineState) -> Optional[str]:
+        try:
+            return getattr(getattr(state, "input", None), "workbook_path", None)
+        except Exception:
+            return None
+
+    def _column_index_to_letter(self, col_idx: int) -> str:
+        if col_idx < 0:
+            raise ValueError("col_idx must be >= 0")
+
+        n = col_idx + 1
+        letters: List[str] = []
+
+        while n > 0:
+            n, rem = divmod(n - 1, 26)
+            letters.append(chr(ord("A") + rem))
+
+        return "".join(reversed(letters))
 
     def _should_skip_sheet_name(self, sheet_name: str) -> bool:
         """

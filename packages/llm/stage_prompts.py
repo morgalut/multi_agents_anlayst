@@ -35,7 +35,7 @@ Output contract:
 
 
 GLOBAL_FINANCIAL_SYSTEM_PROMPT = """
-You are a senior Excel financial statement analysis agent.
+You are a senior Excel financial statement structure analysis agent.
 
 Rules:
 - Never guess.
@@ -43,6 +43,7 @@ Rules:
 - Prefer explicit header, formula, and structural evidence over assumptions.
 - Focus on the most recent reporting period unless the task says otherwise.
 - If evidence is weak or conflicting, lower confidence and return quality flags.
+- Prefer top-level presentation sheets over SAP, GL, TB, ledger, or raw source sheets.
 - When JSON is required, output valid JSON only.
 """.strip()
 
@@ -57,7 +58,7 @@ Goal:
 Analyze the workbook holistically and identify likely top-level financial structure.
 
 Objectives:
-1. Identify the likely main presentation sheet.
+1. Identify likely top-level presentation sheet(s).
 2. Infer whether the workbook contains BS, PL, or both.
 3. Identify likely entities and currencies.
 4. Determine whether consolidated logic or AJE likely exists.
@@ -66,14 +67,13 @@ Objectives:
 Deep-analysis requirements:
 - Compare candidate sheets, not just one sheet in isolation.
 - Prefer presentation sheets over raw source or ledger sheets.
-- Use sheet names, sheet previews, header clues, and structural patterns.
+- Use sheet names, sheet previews, header clues, merged cells, and formula patterns.
 - Lower confidence when evidence is weak or indirect.
 """.strip(),
     output_contract="""
 Return JSON exactly:
 {
-  "main_sheet_name": "",
-  "header_row_index": null,
+  "main_sheet_names": [],
   "contains": [],
   "entities": [
     {
@@ -102,9 +102,10 @@ Return JSON exactly:
 }
 """.strip(),
     analysis_rules=[
-        "Main sheet is typically the top-level presentation sheet, not the raw data source sheet.",
+        "Main sheets are typically top-level presentation sheets, not raw data source sheets.",
         "Entity names require evidence stronger than a generic currency label.",
         "If consolidated or AJE are not supported clearly, prefer false and flag uncertainty.",
+        "Prefer multiple main_sheet_names only when the workbook truly uses separate BS and P&L presentation sheets.",
     ],
     depth="forensic",
 )
@@ -117,30 +118,33 @@ SCHEMA_DETECTION_PROFILE = StagePromptProfile(
 Stage: schema_detection
 
 Goal:
-Identify the main presentation sheet and its likely header row.
+Identify which workbook sheets should be structurally analyzed as financial presentation sheets.
 
 Deep-analysis requirements:
 - Compare candidate sheets rather than evaluating one in isolation.
 - Prefer top-level presentation sheets over raw source or ledger sheets.
-- Use structural evidence such as account labels, formulas calling other sheets, and visible layout clues.
+- Use structural evidence such as account labels, formulas calling other sheets, presentation layout, and sheet naming.
 - Reject sheets that are only data sources.
 """.strip(),
     output_contract="""
 Return JSON exactly:
 {
-  "main_sheet": {
-    "name": "",
-    "header_row_index": null,
-    "confidence": 0.0,
-    "evidence": []
-  },
-  "alternatives": [],
+  "sheet_tasks": [
+    {
+      "sheet_name": "",
+      "is_main_sheet": false,
+      "parent_sheet_name": null,
+      "confidence": 0.0,
+      "evidence": []
+    }
+  ],
   "quality_flags": []
 }
 """.strip(),
     analysis_rules=[
-        "The main sheet typically contains COA labels and presentation-ready structure.",
-        "A sheet referenced by other sheets is often a data source, not the main sheet.",
+        "A sheet referenced by other sheets is often a data source, not the main presentation sheet.",
+        "A presentation sheet often contains account labels and formula links to supporting sheets.",
+        "Do not treat a summary/control sheet as a financial presentation sheet unless the content itself is financial statement content.",
     ],
     depth="forensic",
 )
@@ -154,15 +158,17 @@ Stage: sheet_analysis
 
 Goal:
 1. Classify the sheet as BS, PL, or both.
-2. Identify likely candidate columns for key roles.
-3. Provide short evidence strings.
+2. Identify likely column mappings for the required structural roles.
+3. Infer likely unit and data-row ranges when supported by evidence.
 4. Flag weak or suspicious structure.
 
 Deep-analysis requirements:
 - Inspect header patterns, merged cells, anchor terms, currency markers, and repeated structures.
+- Use formula evidence when available to distinguish presentation columns from source columns.
 - Compare at least two possible interpretations before deciding.
 - Downgrade confidence if a signal could fit multiple roles.
 - Prefer explicit company names over generic labels like Balance, Total, Amount, YTD, USD, or NIS.
+- Focus on the most recent period. Older periods should later map to prior_period.
 """.strip(),
     output_contract="""
 Return JSON exactly:
@@ -172,20 +178,31 @@ Return JSON exactly:
     "confidence": 0.0,
     "evidence": []
   },
-  "roles": {
-    "main_company_dollar": {"col_idx": null, "confidence": 0.0, "evidence": []},
-    "main_company_il": {"col_idx": null, "confidence": 0.0, "evidence": []},
-    "sub_company": {"col_idx": null, "confidence": 0.0, "evidence": []},
-    "aje": {"col_idx": null, "confidence": 0.0, "evidence": []},
-    "consolidated": {"col_idx": null, "confidence": 0.0, "evidence": []}
-  },
+  "columns": [
+    {
+      "col_idx": null,
+      "role": "other",
+      "entity": "",
+      "currency": "",
+      "period": "",
+      "header_text": "",
+      "formula_pattern": "",
+      "row_start": null,
+      "row_end": null,
+      "sheet_name": "",
+      "confidence": 0.0,
+      "evidence": []
+    }
+  ],
+  "unit": null,
   "quality_flags": []
 }
 """.strip(),
     analysis_rules=[
         "A generic balance or total column is not an entity column unless its header clearly identifies an entity.",
         "Merged cells are useful clues but not sufficient proof by themselves.",
-        "If ambiguity remains, prefer null with low confidence.",
+        "Numeric account code columns are usually other, not coa_name.",
+        "If ambiguity remains, prefer null/blank fields with lower confidence.",
     ],
     depth="deep",
 )
@@ -198,11 +215,13 @@ ROLE_MAPPING_PROFILE = StagePromptProfile(
 Stage: role_mapping
 
 Goal:
-Assign structural roles to relevant columns.
+Convert candidate structural columns into final validated workbook-mapping column objects.
 
 Candidate roles:
 - coa_name
 - entity_value
+- debit
+- credit
 - aje
 - consolidated_aje
 - consolidated
@@ -215,74 +234,43 @@ Deep-analysis requirements:
 - Only assign entity_value when the header clearly identifies a company/entity.
 - Treat generic labels like Balance, Total, YTD, U.S. Dollars as non-entity unless tied to a company.
 - Consolidated should be supported by arithmetic/formula logic when available.
-- Numeric account codes are 'other', not 'coa_name'.
+- Numeric account codes are other, not coa_name.
 """.strip(),
     output_contract="""
 Return JSON exactly:
 {
-  "columns": [
+  "resolved_columns": [
     {
       "col_idx": null,
       "role": "other",
-      "entity_name": null,
-      "currency": null,
-      "period": "current",
+      "entity": "",
+      "currency": "",
+      "period": "",
       "header_text": "",
       "formula_pattern": "",
+      "row_start": null,
+      "row_end": null,
+      "sheet_name": "",
       "confidence": 0.0,
       "evidence": []
     }
   ],
-  "entities": [],
-  "has_consolidated": false,
-  "consolidated_formula_pattern": "",
-  "has_aje": false,
-  "aje_types": [],
   "quality_flags": []
 }
 """.strip(),
     analysis_rules=[
-        "'other' columns must not contain entity_name.",
+        "Entity should only be set for entity_value, aje, consolidated_aje, or consolidated.",
         "If latest vs prior period is unclear, lower confidence and flag it.",
+        "Return only roles from the allowed vocabulary.",
     ],
     depth="forensic",
-)
-
-
-ENTITY_RESOLUTION_PROFILE = StagePromptProfile(
-    name="entity_resolution",
-    system_prompt=GLOBAL_FINANCIAL_SYSTEM_PROMPT,
-    task_prompt="""
-Stage: entity_resolution
-
-Goal:
-Normalize resolved entities and column coordinates.
-
-Requirements:
-- Resolve ambiguous entity names conservatively.
-- Keep the output deterministic.
-- Do not invent entities.
-""".strip(),
-    output_contract="""
-Return JSON exactly:
-{
-  "resolved_columns": [],
-  "entities": [],
-  "quality_flags": []
-}
-""".strip(),
-    analysis_rules=[
-        "Do not normalize two different company names into one unless supported by explicit evidence.",
-        "If entity identity is unclear, preserve ambiguity and flag it.",
-    ],
-    depth="standard",
 )
 
 
 QUALITY_AUDIT_PROFILE = StagePromptProfile(
     name="quality_audit",
     system_prompt="""
-You are a skeptical audit reviewer for financial workbook analysis.
+You are a skeptical audit reviewer for financial workbook structure extraction.
 
 Your task is to challenge the extracted structure and identify weak conclusions,
 unsupported assumptions, missing evidence, and likely failure modes.
@@ -293,7 +281,7 @@ Do not guess. Return valid JSON only.
 Stage: quality_audit
 
 Goal:
-Review prior analysis and identify weaknesses.
+Review prior sheet analysis and identify weaknesses.
 
 Deep-analysis requirements:
 - Challenge whether consolidated, AJE, entity, and current-period assumptions are actually proven.
@@ -311,6 +299,7 @@ Return JSON exactly:
     analysis_rules=[
         "A weak header alone is not enough to prove entity ownership.",
         "A consolidated claim should be challenged unless supported by arithmetic or workbook structure evidence.",
+        "A prior_period claim should be challenged unless a newer period is clearly identified elsewhere.",
     ],
     depth="forensic",
 )
@@ -333,7 +322,7 @@ Requirements:
     output_contract="""
 Return JSON exactly:
 {
-  "accepted_role_map": {},
+  "accepted_columns": [],
   "overrides": [],
   "quality_flags": []
 }
@@ -351,24 +340,25 @@ FINAL_RENDER_PROFILE = StagePromptProfile(
     system_prompt="""
 You are a deterministic financial output renderer.
 
-Your task is to format final output from already-resolved analysis.
+Your task is to format final output from already-resolved workbook extraction.
 Do not add new reasoning. Do not invent fields.
 """.strip(),
     task_prompt="""
 Stage: final_render
 
 Goal:
-Convert resolved analysis into final render payload only.
+Convert resolved workbook extraction into the final deterministic report format.
 """.strip(),
     output_contract="""
 Return JSON exactly:
 {
-  "output": {}
+  "text": ""
 }
 """.strip(),
     analysis_rules=[
         "Do not introduce new fields not supported by the resolved input.",
         "Formatting must stay deterministic and conservative.",
+        "The final text must match the required SHEET/COLUMN/ENTITIES/CONSOLIDATED/AJE/NIS structure.",
     ],
     depth="shallow",
 )
@@ -385,7 +375,6 @@ class PromptRegistry:
             "schema_detection": SCHEMA_DETECTION_PROFILE,
             "sheet_analysis": SHEET_ANALYSIS_PROFILE,
             "role_mapping": ROLE_MAPPING_PROFILE,
-            "entity_resolution": ENTITY_RESOLUTION_PROFILE,
             "quality_audit": QUALITY_AUDIT_PROFILE,
             "expert_arbitration": EXPERT_ARBITRATION_PROFILE,
             "final_render": FINAL_RENDER_PROFILE,

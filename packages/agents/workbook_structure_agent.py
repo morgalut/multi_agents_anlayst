@@ -4,53 +4,20 @@ import json
 import logging
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from Multi_agen.packages.llm import LLMClient, LLMMessage
 from Multi_agen.packages.llm.stage_prompts import StagePromptProfile
-
+from Multi_agen.packages.core import (
+    SheetCandidate,
+    WorkbookEntity,
+    WorkbookStructure,
+)
 
 logger = logging.getLogger("multi_agen.agents.workbook_structure_agent")
 if not logger.handlers:
     logging.basicConfig(level=logging.INFO)
-
-
-@dataclass(frozen=True, slots=True)
-class WorkbookEntity:
-    name: str
-    currency: Optional[str] = None
-    confidence: float = 0.0
-    evidence: List[str] = field(default_factory=list)
-
-
-@dataclass(frozen=True, slots=True)
-class WorkbookSheetCandidate:
-    name: str
-    kind: str = "unknown"  # presentation | source | support | unknown
-    confidence: float = 0.0
-    evidence: List[str] = field(default_factory=list)
-
-
-@dataclass(frozen=True, slots=True)
-class WorkbookStructure:
-    """
-    Workbook-level structure summary used by ORC and downstream agents.
-    """
-    main_sheet_name: Optional[str] = None
-    header_row_index: Optional[int] = None
-    contains: List[str] = field(default_factory=list)  # BS / PL
-    entities: List[WorkbookEntity] = field(default_factory=list)
-    has_consolidated: bool = False
-    consolidated_formula_pattern: str = ""
-    has_aje: bool = False
-    aje_types: List[str] = field(default_factory=list)
-    likely_units: Optional[str] = None
-    likely_current_period: Optional[str] = None
-    sheet_candidates: List[WorkbookSheetCandidate] = field(default_factory=list)
-    quality_flags: List[str] = field(default_factory=list)
-    confidence: float = 0.0
-    raw_llm_text: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,14 +36,14 @@ class WorkbookStructureAgent:
 
     Responsibilities:
       - inspect workbook sheet inventory
-      - read a preview from candidate sheets
-      - infer workbook-level structure
-      - identify likely main sheet, entities, consolidated/AJE presence
-      - return conservative structured findings
+      - read previews from candidate sheets
+      - infer workbook-level structure conservatively
+      - identify likely presentation sheets, entities, consolidation, AJE, units, period
 
-    Notes:
-      - this is upstream context for ORC and row-level agents
-      - it should never guess; weak evidence => low confidence + flags
+    Important:
+      - this is workbook-centric, not row-centric
+      - weak evidence must remain weak
+      - output uses the new WorkbookStructure SSOT
     """
 
     def __init__(
@@ -119,7 +86,9 @@ class WorkbookStructureAgent:
 
         if not self.config.llm_enabled or self.llm is None:
             logger.info("WorkbookStructure:llm_disabled_or_missing")
-            return self._fallback_structure(candidate_names, previews)
+            structure = self._fallback_structure(candidate_names, previews)
+            self._attach_provenance(state, structure, matched_by="fallback_no_llm")
+            return structure
 
         system_prompt, user_prompt = self._build_messages(
             sheet_names=sheet_names,
@@ -137,9 +106,8 @@ class WorkbookStructureAgent:
         except Exception as exc:
             logger.exception("WorkbookStructure:llm_failed err=%s", type(exc).__name__)
             fallback = self._fallback_structure(candidate_names, previews)
-            return WorkbookStructure(
-                main_sheet_name=fallback.main_sheet_name,
-                header_row_index=fallback.header_row_index,
+            structure = WorkbookStructure(
+                main_sheet_names=fallback.main_sheet_names,
                 contains=fallback.contains,
                 entities=fallback.entities,
                 has_consolidated=fallback.has_consolidated,
@@ -152,6 +120,8 @@ class WorkbookStructureAgent:
                 quality_flags=fallback.quality_flags + [f"llm_error:{type(exc).__name__}"],
                 confidence=0.0,
             )
+            self._attach_provenance(state, structure, matched_by="fallback_llm_error")
+            return structure
 
         raw_text = (getattr(result, "text", "") or "").strip()
         data = self._parse_json_loose(raw_text)
@@ -159,9 +129,8 @@ class WorkbookStructureAgent:
         if not isinstance(data, dict):
             logger.warning("WorkbookStructure:invalid_json")
             fallback = self._fallback_structure(candidate_names, previews)
-            return WorkbookStructure(
-                main_sheet_name=fallback.main_sheet_name,
-                header_row_index=fallback.header_row_index,
+            structure = WorkbookStructure(
+                main_sheet_names=fallback.main_sheet_names,
                 contains=fallback.contains,
                 entities=fallback.entities,
                 has_consolidated=fallback.has_consolidated,
@@ -175,11 +144,12 @@ class WorkbookStructureAgent:
                 confidence=0.0,
                 raw_llm_text=raw_text[: self.config.store_llm_raw_chars],
             )
+            self._attach_provenance(state, structure, matched_by="fallback_invalid_json")
+            return structure
 
         structure = self._coerce_structure(data)
         structure = WorkbookStructure(
-            main_sheet_name=structure.main_sheet_name,
-            header_row_index=structure.header_row_index,
+            main_sheet_names=structure.main_sheet_names,
             contains=structure.contains,
             entities=structure.entities,
             has_consolidated=structure.has_consolidated,
@@ -194,19 +164,43 @@ class WorkbookStructureAgent:
             raw_llm_text=raw_text[: self.config.store_llm_raw_chars],
         )
 
+        self._attach_provenance(state, structure, matched_by="llm_workbook_structure")
+
         elapsed_ms = (time.perf_counter() - t0) * 1000
         logger.info(
-            "WorkbookStructure:done main_sheet=%s conf=%.3f elapsed_ms=%.2f",
-            structure.main_sheet_name,
+            "WorkbookStructure:done main_sheets=%s conf=%.3f elapsed_ms=%.2f",
+            structure.main_sheet_names,
             structure.confidence,
             elapsed_ms,
         )
         return structure
 
+    def _attach_provenance(
+        self,
+        state: Any,
+        structure: WorkbookStructure,
+        *,
+        matched_by: str,
+    ) -> None:
+        try:
+            setattr(
+                state,
+                "workbook_structure_provenance",
+                {
+                    "main_sheet_names": list(structure.main_sheet_names),
+                    "contains": list(structure.contains),
+                    "matched_by": matched_by,
+                    "source_code": {
+                        "file": "Multi_agen/packages/agents/workbook_structure_agent.py",
+                        "line_start": 1,
+                        "line_end": 999,
+                    },
+                },
+            )
+        except Exception:
+            logger.exception("WorkbookStructure:failed attaching provenance")
+
     def _list_sheets(self, tools: Any) -> List[str]:
-        """
-        Supports several possible tool return shapes.
-        """
         raw = None
 
         if hasattr(tools, "excel_list_sheets"):
@@ -229,7 +223,11 @@ class WorkbookStructureAgent:
 
     def _rank_candidate_sheets(self, sheet_names: List[str]) -> List[str]:
         """
-        Heuristic ranking only. Final decision belongs to LLM or downstream schema detector.
+        Heuristic ranking only.
+
+        Important:
+        - presentation sheets should be preferred
+        - obvious source sheets should be penalized
         """
         preferred_terms = [
             "fs",
@@ -244,9 +242,20 @@ class WorkbookStructureAgent:
             "income",
             "profit",
             "loss",
+            "consolidated",
+        ]
+
+        penalty_terms = [
+            "sap",
+            "gl",
+            "ledger",
             "trial",
             "tb",
-            "consolidated",
+            "dump",
+            "raw",
+            "data",
+            "mapping",
+            "tmp",
         ]
 
         def score(name: str) -> int:
@@ -255,9 +264,10 @@ class WorkbookStructureAgent:
             for term in preferred_terms:
                 if term in lower:
                     s += 10
-            if "sap" in lower or "gl" in lower or "ledger" in lower or "dump" in lower:
-                s -= 6
-            if lower.startswith("_") or lower.startswith("tmp"):
+            for term in penalty_terms:
+                if term in lower:
+                    s -= 8
+            if lower.startswith("_"):
                 s -= 10
             return s
 
@@ -269,6 +279,8 @@ class WorkbookStructureAgent:
         for sheet_name in sheet_names[: self.config.preview_sample_sheets]:
             grid: List[List[Any]] = []
             merged: List[Dict[str, Any]] = []
+            formulas: List[List[Optional[str]]] = []
+
             try:
                 if hasattr(tools, "excel_read_sheet_range"):
                     grid = tools.excel_read_sheet_range(
@@ -280,6 +292,14 @@ class WorkbookStructureAgent:
                     )
                 if hasattr(tools, "excel_detect_merged_cells"):
                     merged = tools.excel_detect_merged_cells(sheet_name=sheet_name)
+                if hasattr(tools, "excel_get_formulas"):
+                    formulas = tools.excel_get_formulas(
+                        sheet_name=sheet_name,
+                        row0=0,
+                        col0=0,
+                        nrows=min(20, self.config.max_sheet_preview_rows),
+                        ncols=min(16, self.config.max_sheet_preview_cols),
+                    )
             except Exception:
                 logger.exception("WorkbookStructure:preview_failed sheet=%s", sheet_name)
 
@@ -292,6 +312,7 @@ class WorkbookStructureAgent:
                         max_cols=self.config.max_sheet_preview_cols,
                     ),
                     "merged_preview": merged[:20] if isinstance(merged, list) else [],
+                    "formula_preview": self._formulas_to_text(formulas, max_rows=12, max_cols=10),
                 }
             )
 
@@ -311,8 +332,9 @@ Your task is to analyze workbook structure conservatively.
 
 Rules:
 - Never guess.
-- Prefer direct sheet/header/formula/layout evidence over assumptions.
-- Identify the likely main presentation sheet, entities, and workbook-level structure.
+- Prefer direct sheet, header, formula, and layout evidence over assumptions.
+- Identify likely presentation sheets, entities, and workbook-level structure.
+- Prefer top-level presentation sheets over SAP/GL/TB source sheets.
 - If evidence is weak, lower confidence and return quality flags.
 - Return valid JSON only.
 """.strip()
@@ -328,8 +350,7 @@ Sheet previews:
 
 Return JSON exactly:
 {{
-  "main_sheet_name": "",
-  "header_row_index": null,
+  "main_sheet_names": [],
   "contains": [],
   "entities": [
     {{
@@ -376,10 +397,10 @@ Sheet previews:
         candidate_names: List[str],
         previews: List[Dict[str, Any]],
     ) -> WorkbookStructure:
-        inferred_main = candidate_names[0] if candidate_names else None
+        inferred_main = candidate_names[:2] if candidate_names else []
 
         sheet_candidates = [
-            WorkbookSheetCandidate(
+            SheetCandidate(
                 name=item["sheet_name"],
                 kind=self._infer_sheet_kind(item["sheet_name"]),
                 confidence=0.35 if i == 0 else 0.20,
@@ -389,12 +410,11 @@ Sheet previews:
         ]
 
         flags = ["workbook_structure_fallback_used"]
-        if inferred_main is None:
-            flags.append("main_sheet_unknown")
+        if not inferred_main:
+            flags.append("main_sheets_unknown")
 
         return WorkbookStructure(
-            main_sheet_name=inferred_main,
-            header_row_index=None,
+            main_sheet_names=inferred_main,
             contains=[],
             entities=[],
             has_consolidated=False,
@@ -410,22 +430,29 @@ Sheet previews:
 
     def _infer_sheet_kind(self, sheet_name: str) -> str:
         s = sheet_name.lower()
-        if any(x in s for x in ["fs", "financial", "balance", "p&l", "pnl", "income"]):
+        if any(x in s for x in ["fs", "financial", "balance", "p&l", "pnl", "income", "profit", "loss"]):
             return "presentation"
         if any(x in s for x in ["sap", "gl", "ledger", "tb", "trial"]):
             return "source"
         return "unknown"
 
     def _coerce_structure(self, data: Dict[str, Any]) -> WorkbookStructure:
-        main_sheet_name = data.get("main_sheet_name")
-        if main_sheet_name is not None:
-            main_sheet_name = str(main_sheet_name)
+        main_sheet_names_raw = data.get("main_sheet_names", [])
+        if not isinstance(main_sheet_names_raw, list):
+            single = data.get("main_sheet_name")
+            if single not in (None, ""):
+                main_sheet_names_raw = [single]
+            else:
+                main_sheet_names_raw = []
 
-        header_row_index = data.get("header_row_index")
-        try:
-            header_row_index = int(header_row_index) if header_row_index is not None else None
-        except Exception:
-            header_row_index = None
+        main_sheet_names: List[str] = []
+        seen_names = set()
+        for item in main_sheet_names_raw:
+            name = str(item).strip()
+            if not name or name in seen_names:
+                continue
+            seen_names.add(name)
+            main_sheet_names.append(name)
 
         contains = data.get("contains", [])
         if not isinstance(contains, list):
@@ -466,7 +493,7 @@ Sheet previews:
         aje_types = data.get("aje_types", [])
         if not isinstance(aje_types, list):
             aje_types = []
-        aje_types = [str(x) for x in aje_types]
+        aje_types = [str(x) for x in aje_types if str(x).strip()]
 
         likely_units = data.get("likely_units")
         likely_units = None if likely_units in ("", None) else str(likely_units)
@@ -475,7 +502,7 @@ Sheet previews:
         likely_current_period = None if likely_current_period in ("", None) else str(likely_current_period)
 
         candidates_raw = data.get("sheet_candidates", [])
-        candidates: List[WorkbookSheetCandidate] = []
+        candidates: List[SheetCandidate] = []
         if isinstance(candidates_raw, list):
             for item in candidates_raw:
                 if not isinstance(item, dict):
@@ -492,7 +519,7 @@ Sheet previews:
                 if not isinstance(evidence, list):
                     evidence = []
                 candidates.append(
-                    WorkbookSheetCandidate(
+                    SheetCandidate(
                         name=name,
                         kind=kind,
                         confidence=max(0.0, min(1.0, conf)),
@@ -512,8 +539,7 @@ Sheet previews:
         confidence = max(0.0, min(1.0, confidence))
 
         return WorkbookStructure(
-            main_sheet_name=main_sheet_name,
-            header_row_index=header_row_index,
+            main_sheet_names=main_sheet_names,
             contains=contains,
             entities=entities,
             has_consolidated=has_consolidated,
@@ -533,10 +559,14 @@ Sheet previews:
 
         lines: List[str] = []
         row_count = min(len(grid), max_rows)
-        col_count = min(len(grid[0]) if grid else 0, max_cols)
+        width = 0
+        for r in range(row_count):
+            row = grid[r] if isinstance(grid[r], list) else []
+            width = max(width, len(row))
+        col_count = min(width, max_cols)
 
         for r in range(row_count):
-            row = grid[r] if r < len(grid) else []
+            row = grid[r] if r < len(grid) and isinstance(grid[r], list) else []
             cells: List[str] = []
             for c in range(col_count):
                 value = row[c] if c < len(row) else ""
@@ -544,6 +574,37 @@ Sheet previews:
                 s = s.replace("\n", " ").replace("\r", " ").strip()
                 if len(s) > 40:
                     s = s[:40] + "…"
+                cells.append(s)
+            lines.append(f"{r:02d} | " + " | ".join(cells))
+
+        return "\n".join(lines)
+
+    def _formulas_to_text(
+        self,
+        formulas: List[List[Optional[str]]],
+        max_rows: int,
+        max_cols: int,
+    ) -> str:
+        if not isinstance(formulas, list) or not formulas:
+            return ""
+
+        lines: List[str] = []
+        row_count = min(len(formulas), max_rows)
+        width = 0
+        for r in range(row_count):
+            row = formulas[r] if isinstance(formulas[r], list) else []
+            width = max(width, len(row))
+        col_count = min(width, max_cols)
+
+        for r in range(row_count):
+            row = formulas[r] if r < len(formulas) and isinstance(formulas[r], list) else []
+            cells: List[str] = []
+            for c in range(col_count):
+                value = row[c] if c < len(row) else ""
+                s = "" if value is None else str(value)
+                s = s.replace("\n", " ").replace("\r", " ").strip()
+                if len(s) > 50:
+                    s = s[:50] + "…"
                 cells.append(s)
             lines.append(f"{r:02d} | " + " | ".join(cells))
 

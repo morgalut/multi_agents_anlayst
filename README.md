@@ -19,7 +19,11 @@ curl -X POST "http://127.0.0.1:8000/run" ^
 ```
 
 ## What was done and what needs to be fixed Programmer's notes
-1. The code works and runs
-2. The final result needs to run from which SHEET it took the data and from which row it needs to be compared so that the final JSON will also display these results
-3. Build a comparison system that displays the results that the presentation will generate and your results (it is possible for now that it was displayed in JSON and then we will perform a manual comparison)
-4. Think about a way to validate the information that can be added to the process
+1. create for any agen file is show what is get from promt and what is answer like log but need by more Specific to that agent
+2. start build valid for any agen for check answer 
+3. check with yaniv what anwer is better and how you can improve this 
+
+
+
+
+
