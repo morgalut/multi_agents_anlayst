@@ -22,10 +22,13 @@ from Multi_agen.packages.agents import (
 from Multi_agen.packages.agents.orc import OrcConfig, OrcPromptPolicy
 from Multi_agen.packages.agents.schema_detector import MainSheetSchemaDetector
 from Multi_agen.packages.agents.workbook_structure_agent import WorkbookStructureAgent
+from Multi_agen.packages.agents.sheet_company_agent import SheetCompanyAgent
+from Multi_agen.packages.agents.sheet_currency_agent import SheetCurrencyAgent
 from Multi_agen.packages.agents.quality_auditor import QualityAuditorAgent
 from Multi_agen.packages.llm import LLMClient
 from Multi_agen.packages.llm.stage_prompts import PromptRegistry
 from Multi_agen.packages.mcp_clients.excel_client import ExcelClientError
+from Multi_agen.packages.core.search_config import ColumnSearchConfig
 
 from .tool_router import ToolRouter, ToolRouterConfig
 from Multi_agen.router.mcp_manager import MCPManager
@@ -36,7 +39,7 @@ except Exception:  # pragma: no cover
     URLError = Exception  # type: ignore
 
 
-APP_VERSION = "0.4.0"
+APP_VERSION = "0.6.0"
 
 logger = logging.getLogger("multi_agen.router.api")
 if not logger.handlers:
@@ -65,7 +68,7 @@ class RunResponse(BaseModel):
 
 
 # ============================================================
-# Helpers
+# Serialization helpers
 # ============================================================
 
 def _llm_enabled(llm_config: Optional[Dict[str, Any]]) -> bool:
@@ -74,56 +77,73 @@ def _llm_enabled(llm_config: Optional[Dict[str, Any]]) -> bool:
 
 def _safe_asdict(value: Any) -> Any:
     """
-    Convert dataclasses recursively when possible.
-    Fall back to the raw value for non-dataclasses.
+    Recursively convert dataclasses to dicts.
+
+    Handles nested dataclasses (ExtractionSummary, ComparisonBlock,
+    ColumnComparisonHit, ExpectedColumn, EntityCurrencyPair …) that are
+    new in v0.6.0 / FinalRenderOutput.
+    Falls back to raw value for non-dataclasses.
     """
     if value is None:
         return None
-    if is_dataclass(value):
+    if is_dataclass(value) and not isinstance(value, type):
         return asdict(value)
+    if isinstance(value, list):
+        return [_safe_asdict(item) for item in value]
+    if isinstance(value, dict):
+        return {k: _safe_asdict(v) for k, v in value.items()}
     return value
 
 
 def _serialize_sheet_result(value: Any) -> Dict[str, Any]:
     if value is None:
         return {}
-
-    if is_dataclass(value):
+    if is_dataclass(value) and not isinstance(value, type):
         return asdict(value)
     if isinstance(value, dict):
         return dict(value)
-
     return {"value": value}
 
 
-def _attach_workbook_out_path(state: PipelineState, workbook_out_path: Optional[str]) -> None:
-    if not workbook_out_path:
+def _attach_workbook_out_path(state: PipelineState, path: Optional[str]) -> None:
+    if not path:
         return
-
     try:
-        setattr(state.input, "workbook_out_path", workbook_out_path)
+        setattr(state.input, "workbook_out_path", path)
     except Exception:
-        logger.exception("RUN failed to attach workbook_out_path to state.input")
+        logger.exception("Failed to attach workbook_out_path")
 
+
+# ============================================================
+# ORC factory
+# ============================================================
 
 def _build_orc(*, tools: Any, llm: Optional[LLMClient]) -> ORCAgent:
     """
-    Build the workbook/sheet-centric ORC dependency graph.
+    Build the full ORC dependency graph.
+
+    v0.6.0: wires SheetCompanyAgent + SheetCurrencyAgent and
+    enables the comparison-first FinalRenderOutput.
     """
     prompt_registry = PromptRegistry()
+    search_config = ColumnSearchConfig()
 
     schema_detector = MainSheetSchemaDetector()
     workbook_structure_agent = WorkbookStructureAgent(llm=llm)
     sheet_analyzer = ReActSheetAnalyzer(llm=llm)
     role_mapper = RoleMapperAgent()
-    output_renderer = OutputRenderer()
+    output_renderer = OutputRenderer(search_config=search_config)
     expert_panel = ExpertPanelAgent()
     quality_auditor = QualityAuditorAgent()
+    company_agent = SheetCompanyAgent(llm=llm, llm_enabled=(llm is not None))
+    currency_agent = SheetCurrencyAgent(llm=llm, llm_enabled=(llm is not None))
 
     prompt_policy = OrcPromptPolicy(
         workbook_structure="workbook_structure",
         schema_detection="schema_detection",
         sheet_analysis="sheet_analysis",
+        sheet_company="sheet_company",
+        sheet_currency="sheet_currency",
         role_mapping="role_mapping",
         quality_audit="quality_audit",
         expert_arbitration="expert_arbitration",
@@ -135,6 +155,8 @@ def _build_orc(*, tools: Any, llm: Optional[LLMClient]) -> ORCAgent:
         enable_workbook_structure_pass=True,
         enable_quality_audit=True,
         enable_expert_arbitration=True,
+        enable_company_extraction=True,
+        enable_currency_extraction=True,
     )
 
     return ORCAgent(
@@ -146,15 +168,25 @@ def _build_orc(*, tools: Any, llm: Optional[LLMClient]) -> ORCAgent:
         workbook_structure_agent=workbook_structure_agent,
         expert_panel=expert_panel,
         quality_auditor=quality_auditor,
+        company_agent=company_agent,
+        currency_agent=currency_agent,
         prompt_registry=prompt_registry,
         prompt_policy=prompt_policy,
         config=config,
     )
 
 
+# ============================================================
+# Response builder
+# ============================================================
+
 def _build_run_response(state: PipelineState) -> RunResponse:
     """
-    Centralized API response construction for workbook/sheet extraction.
+    Build the API response from pipeline state.
+
+    final_render is now a richer object containing:
+      summary, comparison, normalized_output (new in v0.6.0)
+    _safe_asdict handles recursive dataclass serialization for all nested types.
     """
     return RunResponse(
         run_id=state.run_id,
@@ -164,14 +196,17 @@ def _build_run_response(state: PipelineState) -> RunResponse:
         ),
         task_provenance=list(getattr(state, "task_provenance", []) or []),
         sheet_tasks=[_safe_asdict(t) for t in (getattr(state, "sheet_tasks", []) or [])],
-        sheet_results=[_serialize_sheet_result(x) for x in (getattr(state, "sheet_results", []) or [])],
+        sheet_results=[
+            _serialize_sheet_result(x)
+            for x in (getattr(state, "sheet_results", []) or [])
+        ],
         workbook_result=_safe_asdict(getattr(state, "workbook_result", None)),
         final_render=_safe_asdict(getattr(state, "final_render", None)),
     )
 
 
 # ============================================================
-# FastAPI application builder
+# FastAPI app builder
 # ============================================================
 
 def build_app(
@@ -187,24 +222,18 @@ def build_app(
     """
     Build the FastAPI app for the multi-agent Excel pipeline.
 
-    Features:
-    - optional MCP subprocess auto-start on app startup
-    - graceful MCP shutdown
-    - centralized ORC dependency construction
-    - structured Excel MCP error handling
-    - response serialization for workbook/sheet-centric extraction
+    v0.6.0 additions:
+    - Comparison-first FinalRenderOutput (summary + comparison + normalized_output)
+    - _safe_asdict upgraded to handle nested dataclasses recursively
+    - SheetCompanyAgent + SheetCurrencyAgent wired in ORC
+    - workbook_structure_entities forwarded from ORC → renderer for comparison derivation
     """
-    logger.info("Router API init servers=%s", list(server_base_urls.keys()))
+    logger.info("API init servers=%s", list(server_base_urls.keys()))
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.mcp_manager = None
-
         if mcp_auto_start and mcp_servers_cfg:
-            logger.info(
-                "MCP auto-start enabled. Spawning MCP servers: %s",
-                list(mcp_servers_cfg.keys()),
-            )
             mgr = MCPManager(
                 servers_cfg=mcp_servers_cfg,
                 startup_timeout_seconds=float(mcp_startup_timeout_seconds),
@@ -213,13 +242,11 @@ def build_app(
             mgr.start_all()
             app.state.mcp_manager = mgr
             logger.info("MCP servers ready")
-
         try:
             yield
         finally:
             mgr = getattr(app.state, "mcp_manager", None)
             if mgr and mcp_stop_on_shutdown:
-                logger.info("Stopping MCP servers on shutdown")
                 mgr.stop_all()
 
     app = FastAPI(
@@ -229,73 +256,43 @@ def build_app(
     )
     router = APIRouter()
 
-    # ============================================================
-    # Exception handlers
-    # ============================================================
+    # ── Exception handlers ───────────────────────────────────────────
 
     @app.exception_handler(URLError)
     async def urlerror_handler(request: Request, exc: Exception):
-        return JSONResponse(
-            status_code=503,
-            content={
-                "error": "MCP dependency unavailable",
-                "detail": str(exc),
-                "hint": "An MCP server is unreachable. Verify it is running and base_url host/port are correct.",
-            },
-        )
+        return JSONResponse(status_code=503, content={
+            "error": "MCP dependency unavailable", "detail": str(exc),
+            "hint": "An MCP server is unreachable.",
+        })
 
     @app.exception_handler(ConnectionRefusedError)
     async def connrefused_handler(request: Request, exc: Exception):
-        return JSONResponse(
-            status_code=503,
-            content={
-                "error": "MCP connection refused",
-                "detail": str(exc),
-                "hint": "Nothing is listening on the configured MCP port. Start the MCP server or fix base_url/port.",
-            },
-        )
+        return JSONResponse(status_code=503, content={
+            "error": "MCP connection refused", "detail": str(exc),
+        })
 
     @app.exception_handler(ExcelClientError)
-    async def excel_client_error_handler(request: Request, exc: ExcelClientError):
-        status_code = exc.status_code if isinstance(exc.status_code, int) and 400 <= exc.status_code <= 599 else 503
-        return JSONResponse(
-            status_code=status_code,
-            content={
-                "error": "Excel MCP tool failure",
-                "detail": str(exc),
-                "server_id": exc.server_id,
-                "tool_name": exc.tool_name,
-                "tool_args": exc.args_payload,
-                "response_body": exc.response_body,
-            },
-        )
+    async def excel_error_handler(request: Request, exc: ExcelClientError):
+        sc = exc.status_code if isinstance(exc.status_code, int) and 400 <= exc.status_code <= 599 else 503
+        return JSONResponse(status_code=sc, content={
+            "error": "Excel MCP tool failure", "detail": str(exc),
+            "server_id": exc.server_id, "tool_name": exc.tool_name,
+        })
 
     @app.exception_handler(HTTPException)
-    async def http_exception_handler(request: Request, exc: HTTPException):
-        return JSONResponse(
-            status_code=exc.status_code,
-            content={
-                "error": "HTTP exception",
-                "detail": exc.detail,
-            },
-        )
+    async def http_handler(request: Request, exc: HTTPException):
+        return JSONResponse(status_code=exc.status_code, content={
+            "error": "HTTP exception", "detail": exc.detail,
+        })
 
-    # ============================================================
-    # Routes
-    # ============================================================
+    # ── Routes ───────────────────────────────────────────────────────
 
     @router.get("/")
     def root() -> Dict[str, Any]:
-        logger.info("Root requested")
-        return {
-            "service": "multi-agent-router",
-            "ok": True,
-            "version": APP_VERSION,
-        }
+        return {"service": "multi-agent-router", "ok": True, "version": APP_VERSION}
 
     @router.get("/health")
     def health() -> Dict[str, Any]:
-        logger.info("Health requested")
         return {
             "ok": True,
             "router_version": APP_VERSION,
@@ -304,13 +301,14 @@ def build_app(
             "llm_enabled": _llm_enabled(llm_config),
             "mcp_auto_start": bool(mcp_auto_start),
             "workbook_structure_stage_enabled": True,
-            "prompt_registry_enabled": True,
+            "sheet_company_agent_enabled": True,
+            "sheet_currency_agent_enabled": True,
+            "comparison_first_output_enabled": True,   # new in v0.6.0
             "mode": "workbook_sheet_structural_extraction",
         }
 
     @router.get("/capabilities")
     def capabilities() -> Dict[str, Any]:
-        logger.info("Capabilities requested")
         return {
             "available_capabilities": available_capabilities,
             "mcp_servers": list(server_base_urls.keys()),
@@ -318,51 +316,24 @@ def build_app(
 
     @router.post("/run", response_model=RunResponse)
     def run(req: RunRequest) -> RunResponse:
-        start_time = time.perf_counter()
+        t0 = time.perf_counter()
         logger.info("RUN start run_id=%s workbook=%s", req.run_id, req.workbook_path)
 
         try:
-            # ------------------------------------------------------------
-            # MCP transport
-            # ------------------------------------------------------------
-            logger.info("RUN init MCP transport")
             from .transport_http import HttpMCPTransport
             transport = HttpMCPTransport(server_base_urls=server_base_urls)
-
-            # ------------------------------------------------------------
-            # Tool router
-            # ------------------------------------------------------------
-            logger.info("RUN init ToolRouter")
             tools = ToolRouter(
                 transport=transport,
                 config=ToolRouterConfig(workbook_path=req.workbook_path),
             )
-            logger.info("RUN ToolRouter ready")
 
-            # ------------------------------------------------------------
-            # LLM
-            # ------------------------------------------------------------
-            enabled = _llm_enabled(llm_config)
             llm: Optional[LLMClient] = None
-
-            if enabled:
-                logger.info("RUN init LLM client (Azure env)")
+            if _llm_enabled(llm_config):
                 llm = LLMClient()
                 logger.info("RUN LLM enabled")
-            else:
-                logger.info("RUN LLM disabled")
 
-            # ------------------------------------------------------------
-            # ORC
-            # ------------------------------------------------------------
-            logger.info("RUN init ORC orchestrator and agents")
             orc = _build_orc(tools=tools, llm=llm)
-            logger.info("RUN ORC ready")
 
-            # ------------------------------------------------------------
-            # Pipeline state
-            # ------------------------------------------------------------
-            logger.info("RUN create PipelineState")
             state = PipelineState(
                 run_id=req.run_id,
                 input=RunInput(workbook_path=req.workbook_path),
@@ -373,37 +344,22 @@ def build_app(
             )
             _attach_workbook_out_path(state, req.workbook_out_path)
 
-            # ------------------------------------------------------------
-            # Execute pipeline
-            # ------------------------------------------------------------
-            logger.info("RUN ORC run() start")
             state = orc.run(state)
-            logger.info(
-                "RUN ORC run() done sheet_tasks=%d sheet_results=%d",
-                len(getattr(state, "sheet_tasks", []) or []),
-                len(getattr(state, "sheet_results", []) or []),
-            )
-
-            # ------------------------------------------------------------
-            # Serialize response
-            # ------------------------------------------------------------
-            logger.info("RUN serialize response")
             response = _build_run_response(state)
 
-            elapsed_ms = (time.perf_counter() - start_time) * 1000
-            logger.info("RUN complete run_id=%s elapsed_ms=%.2f", req.run_id, elapsed_ms)
+            logger.info(
+                "RUN complete run_id=%s elapsed_ms=%.1f",
+                req.run_id, (time.perf_counter() - t0) * 1000,
+            )
             return response
 
-        except ExcelClientError:
-            logger.exception("RUN excel MCP failure run_id=%s workbook=%s", req.run_id, req.workbook_path)
-            raise
-        except HTTPException:
-            logger.exception("RUN http exception run_id=%s workbook=%s", req.run_id, req.workbook_path)
+        except (ExcelClientError, HTTPException):
+            logger.exception("RUN known error run_id=%s", req.run_id)
             raise
         except Exception:
-            logger.exception("RUN failed run_id=%s workbook=%s", req.run_id, req.workbook_path)
+            logger.exception("RUN failed run_id=%s", req.run_id)
             raise
 
     app.include_router(router)
-    logger.info("Router API ready")
+    logger.info("API ready version=%s", APP_VERSION)
     return app

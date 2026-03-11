@@ -1,15 +1,6 @@
 """
 Shared pipeline state for workbook-structure extraction orchestration.
-
-This state is designed for:
-- workbook-level structure analysis
-- sheet-centric task execution
-- accumulation of per-sheet extraction results
-- deterministic final rendering
-
-It replaces the old row-centric summary-sheet workflow state.
 """
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -20,6 +11,7 @@ from .schemas import (
     SheetExtractionResult,
     SheetTask,
     WorkbookExtractionResult,
+    WorkbookSheetProfilesResult,
     WorkbookStructure,
 )
 
@@ -41,16 +33,14 @@ class PipelineState:
     """
     Shared orchestration state for workbook/sheet structural extraction.
 
-    Main flow:
-    1. workbook_structure is populated upstream
-    2. sheet_tasks are created from workbook structure / workbook sheet inventory
-    3. sheet_results are accumulated per analyzed sheet
-    4. workbook_result is assembled from sheet_results
-    5. final_render is produced as deterministic text
+    Two parallel output tracks:
 
-    Notes:
-    - Keep large raw grids out of this state; store only compact metadata/results.
-    - Use memory for temporary agent scratch data when needed.
+    Track A (existing) — workbook extraction / comparison:
+        workbook_result  →  FinalRenderOutput
+
+    Track B (new) — per-sheet profile export:
+        sheet_profiles_result  →  WorkbookSheetProfilesResult
+        Serialises to the exmplete.json shape via .to_dict().
     """
     run_id: str
     input: RunInput
@@ -63,13 +53,14 @@ class PipelineState:
     workbook_result: Optional[WorkbookExtractionResult] = None
     final_render: Optional[FinalRenderOutput] = None
 
+    # NEW: per-sheet profile export result (Track B)
+    sheet_profiles_result: Optional[WorkbookSheetProfilesResult] = None
+
     tooling: ToolingState = field(default_factory=ToolingState)
 
-    # Provenance / audit helpers
     workbook_structure_provenance: Optional[Dict[str, Any]] = None
     task_provenance: List[Dict[str, Any]] = field(default_factory=list)
 
-    # Scratch space for agents (avoid storing large workbook grids here)
     memory: Dict[str, Any] = field(default_factory=dict)
 
     def add_sheet_result(self, result: SheetExtractionResult) -> None:
@@ -80,3 +71,16 @@ class PipelineState:
 
     def set_final_render(self, render: FinalRenderOutput) -> None:
         self.final_render = render
+
+    def set_sheet_profiles_result(self, result: WorkbookSheetProfilesResult) -> None:
+        """Store the per-sheet profile export result (Track B)."""
+        self.sheet_profiles_result = result
+
+    def get_sheet_profiles_dict(self) -> Optional[Dict[str, Any]]:
+        """
+        Convenience helper: return the profile export in serialisable dict form,
+        ready for JSON encoding or API response serialisation.
+        """
+        if self.sheet_profiles_result is None:
+            return None
+        return self.sheet_profiles_result.to_dict()

@@ -1,0 +1,735 @@
+curl -X POST "http://127.0.0.1:8000/run" ^
+More?   -H "Content-Type: application/json" ^
+More?   -d "{\"run_id\":\"run-1\",\"workbook_path\":\"C:\\\\Users\\\\morga\\\\Desktop\\\\xlsx\\\\Assembly - 1.xlsx\"}"{
+    "run_id": "run-1",
+    "workbook_structure": {
+        "main_sheet_names": [
+            "FS",
+            "BOD Slides"
+        ],
+        "contains": [
+            "BS",
+            "PL"
+        ],
+        "entities": [
+            {
+                "name": "LTD",
+                "currency": "NIS",
+                "confidence": 0.9,
+                "evidence": [
+                    "FS!B4 references WP_LTD",
+                    "Header 'In NIS'",
+                    "Column labeled 'LTD'"
+                ]
+            },
+            {
+                "name": "INC",
+                "currency": "USD",
+                "confidence": 0.9,
+                "evidence": [
+                    "FS sheet columns labeled 'INC' and '$'",
+                    "Formulas reference GL_INC"
+                ]
+            }
+        ],
+        "has_consolidated": true,
+        "consolidated_formula_pattern": "=SUM(E11+I11)",
+        "has_aje": true,
+        "aje_types": [
+            "LTD",
+            "INC"
+        ],
+        "likely_units": "NIS and USD (thousands in BOD Slides)",
+        "likely_current_period": "2022-12-31",
+        "sheet_candidates": [
+            {
+                "name": "FS",
+                "kind": "financial_statements",
+                "confidence": 1.0,
+                "evidence": [
+                    "Header 'Financial Statements'",
+                    "Sections labeled 'ASSETS', 'LIABILITIES', 'P&L'",
+                    "Formulas referencing GL_LTD, GL_INC, AJE_LTD, AJE_INC",
+                    "Column headers include 'LTD', 'INC', 'AJE', 'Consolidated'"
+                ]
+            },
+            {
+                "name": "BOD Slides",
+                "kind": "presentation_summary",
+                "confidence": 0.8,
+                "evidence": [
+                    "Header 'P&L Summary'",
+                    "References to FS!M79, FS!M87, FS!M110 etc.",
+                    "Contains summarized P&L and cash flow sections"
+                ]
+            }
+        ],
+        "quality_flags": [
+            "multi-entity workbook",
+            "clear consolidation logic",
+            "AJE sheets referenced",
+            "currency duality (NIS/USD)"
+        ],
+        "confidence": 0.95,
+        "raw_llm_text": "{\n  \"main_sheet_names\": [\"FS\", \"BOD Slides\"],\n  \"contains\": [\"BS\", \"PL\"],\n  \"entities\": [\n    {\n      \"name\": \"LTD\",\n      \"currency\": \"NIS\",\n      \"confidence\": 0.9,\n      \"evidence\": [\"FS!B4 references WP_LTD\", \"Header 'In NIS'\", \"Column labeled 'LTD'\"]\n    },\n    {\n      \"name\": \"INC\",\n      \"currency\": \"USD\",\n      \"confidence\": 0.9,\n      \"evidence\": [\"FS sheet columns labeled 'INC' and '$'\", \"Formulas reference GL_INC\"]\n    }\n  ],\n  \"has_consolidated\": true,\n  \"consolidated_formula_pattern\": \"=SUM(E11+I11)\",\n  \"has_aje\": true,\n  \"aje_types\": [\"LTD\", \"INC\"],\n  \"likely_units\": \"NIS and USD (thousands in BOD Slides)\",\n  \"likely_current_period\": \"2022-12-31\",\n  \"sheet_candidates\": [\n    {\n      \"name\": \"FS\",\n      \"kind\": \"financial_statements\",\n      \"confidence\": 1.0,\n      \"evidence\": [\n        \"Header 'Financial Statements'\",\n        \"Sections labeled 'ASSETS', 'LIABILITIES', 'P&L'\",\n        \"Formulas referencing GL_LTD, GL_INC, AJE_LTD, AJE_INC\",\n        \"Column headers include 'LTD', 'INC', 'AJE', 'Consolidated'\"\n      ]\n    },\n    {\n      \"name\": \"BOD Slides\",\n      \"kind\": \"presentation_summary\",\n      \"confidence\": 0.8,\n      \"evidence\": [\n        \"Header 'P&L Summary'\",\n        \"References to FS!M79, FS!M87, FS!M110 etc.\",\n        \"Contains summarized P&L and cash flow sections\"\n      ]\n    }\n  ],\n  \"quality_flags\": [\"multi-entity workbook\", \"clear consolidation logic\", \"AJE sheets referenced\", \"currency duality (NIS/USD)\"],\n  \"confidence\": 0.95\n}"
+    },
+    "workbook_structure_provenance": {
+        "workbook_structure_main_sheet_names": [
+            "FS",
+            "BOD Slides"
+        ],
+        "selected_sheet_tasks": [
+            "FS"
+        ],
+        "source_code": {
+            "file": "Multi_agen/packages/agents/schema_detector.py"
+        }
+    },
+    "task_provenance": [
+        {
+            "sheet_name": "FS",
+            "provenance": {
+                "matched_by": "grid_first_then_formula_probe",
+                "score": 10,
+                "evidence": [
+                    "top_statement:bs=1,pl=0",
+                    "account_hits:1",
+                    "presentation_bonus:1",
+                    "distinct_formula_refs:3"
+                ],
+                "source_code": {
+                    "file": "Multi_agen/packages/agents/schema_detector.py"
+                }
+            }
+        }
+    ],
+    "sheet_tasks": [
+        {
+            "sheet_name": "FS",
+            "is_main_sheet": true,
+            "parent_sheet_name": null
+        }
+    ],
+    "sheet_results": [
+        {
+            "sheet_name": "FS",
+            "contains": "BS",
+            "unit": "NIS",
+            "data_row_start": 10,
+            "data_row_end": 186,
+            "columns": [
+                {
+                    "col_idx": 2,
+                    "col_letter": "C",
+                    "role": "coa_name",
+                    "entity": "",
+                    "currency": "",
+                    "period": "2022-12-31",
+                    "header_text": "Account name / description",
+                    "formula_pattern": "",
+                    "row_start": 10,
+                    "row_end": 59,
+                    "sheet_name": "FS",
+                    "confidence": 0.95,
+                    "evidence": [
+                        "Textual account names: 'Cash and cash equivalents', 'Accounts Receivables', 'Fixed assets', 'Accounts payables'",
+                        "Hierarchical structure under ASSETS and LIABILITIES"
+                    ]
+                },
+                {
+                    "col_idx": 10,
+                    "col_letter": "K",
+                    "role": "aje",
+                    "entity": "",
+                    "currency": "",
+                    "period": "2022-12-31",
+                    "header_text": "AJE",
+                    "formula_pattern": "",
+                    "row_start": 167,
+                    "row_end": 186,
+                    "sheet_name": "FS",
+                    "confidence": 0.7,
+                    "evidence": [
+                        "heuristic_aje_header"
+                    ]
+                },
+                {
+                    "col_idx": 12,
+                    "col_letter": "M",
+                    "role": "consolidated",
+                    "entity": "Consolidated",
+                    "currency": "USD",
+                    "period": "2022-12-31",
+                    "header_text": "Consolidated | $",
+                    "formula_pattern": "",
+                    "row_start": 167,
+                    "row_end": 186,
+                    "sheet_name": "FS",
+                    "confidence": 0.73,
+                    "evidence": [
+                        "heuristic_consolidated_header_or_formula"
+                    ]
+                },
+                {
+                    "col_idx": 15,
+                    "col_letter": "P",
+                    "role": "budget",
+                    "entity": "",
+                    "currency": "",
+                    "period": "2022-12-31",
+                    "header_text": "Budget",
+                    "formula_pattern": "",
+                    "row_start": 167,
+                    "row_end": 186,
+                    "sheet_name": "FS",
+                    "confidence": 0.68,
+                    "evidence": [
+                        "heuristic_budget_header"
+                    ]
+                }
+            ],
+            "quality_flags": [
+                "missing_entity_column",
+                "consolidated_without_entities",
+                "aje_without_entity_columns"
+            ],
+            "confidence": 0.839
+        }
+    ],
+    "workbook_result": {
+        "sheets": [
+            {
+                "sheet_name": "FS",
+                "contains": "BS",
+                "unit": "NIS",
+                "data_row_start": 10,
+                "data_row_end": 186,
+                "columns": [
+                    {
+                        "col_idx": 2,
+                        "col_letter": "C",
+                        "role": "coa_name",
+                        "entity": "",
+                        "currency": "",
+                        "period": "2022-12-31",
+                        "header_text": "Account name / description",
+                        "formula_pattern": "",
+                        "row_start": 10,
+                        "row_end": 59,
+                        "sheet_name": "FS",
+                        "confidence": 0.95,
+                        "evidence": [
+                            "Textual account names: 'Cash and cash equivalents', 'Accounts Receivables', 'Fixed assets', 'Accounts payables'",
+                            "Hierarchical structure under ASSETS and LIABILITIES"
+                        ]
+                    },
+                    {
+                        "col_idx": 10,
+                        "col_letter": "K",
+                        "role": "aje",
+                        "entity": "",
+                        "currency": "",
+                        "period": "2022-12-31",
+                        "header_text": "AJE",
+                        "formula_pattern": "",
+                        "row_start": 167,
+                        "row_end": 186,
+                        "sheet_name": "FS",
+                        "confidence": 0.7,
+                        "evidence": [
+                            "heuristic_aje_header"
+                        ]
+                    },
+                    {
+                        "col_idx": 12,
+                        "col_letter": "M",
+                        "role": "consolidated",
+                        "entity": "Consolidated",
+                        "currency": "USD",
+                        "period": "2022-12-31",
+                        "header_text": "Consolidated | $",
+                        "formula_pattern": "",
+                        "row_start": 167,
+                        "row_end": 186,
+                        "sheet_name": "FS",
+                        "confidence": 0.73,
+                        "evidence": [
+                            "heuristic_consolidated_header_or_formula"
+                        ]
+                    },
+                    {
+                        "col_idx": 15,
+                        "col_letter": "P",
+                        "role": "budget",
+                        "entity": "",
+                        "currency": "",
+                        "period": "2022-12-31",
+                        "header_text": "Budget",
+                        "formula_pattern": "",
+                        "row_start": 167,
+                        "row_end": 186,
+                        "sheet_name": "FS",
+                        "confidence": 0.68,
+                        "evidence": [
+                            "heuristic_budget_header"
+                        ]
+                    }
+                ],
+                "quality_flags": [
+                    "missing_entity_column",
+                    "consolidated_without_entities",
+                    "aje_without_entity_columns"
+                ],
+                "confidence": 0.839
+            }
+        ],
+        "entities": [
+            "LTD",
+            "INC"
+        ],
+        "has_consolidated": true,
+        "consolidated_formula_pattern": "=SUM(E11+I11)",
+        "has_aje": true,
+        "aje_types": [
+            "per-entity"
+        ],
+        "has_nis": true,
+        "quality_flags": [
+            "missing_entity_column",
+            "consolidated_without_entities",
+            "aje_without_entity_columns",
+            "multi-entity workbook",
+            "clear consolidation logic",
+            "AJE sheets referenced",
+            "currency duality (NIS/USD)"
+        ],
+        "main_sheet_name": "FS",
+        "entity_currency_pairs": [
+            {
+                "entity": "LTD",
+                "currency": "NIS",
+                "sheet_name": "FS",
+                "header": "LTD",
+                "column": "D",
+                "confidence": 0.95,
+                "source": "sheet_company+sheet_currency+workbook_structure"
+            },
+            {
+                "entity": "INC",
+                "currency": "USD",
+                "sheet_name": "FS",
+                "header": "INC",
+                "column": "J",
+                "confidence": 0.9,
+                "source": "sheet_company+sheet_currency+workbook_structure"
+            }
+        ],
+        "companies_table": [
+            {
+                "entity": "INC",
+                "sheet": "FS",
+                "source": "sheet_company+workbook_structure",
+                "header": "INC",
+                "column": "J",
+                "confidence": 0.95
+            },
+            {
+                "entity": "LTD",
+                "sheet": "FS",
+                "source": "sheet_company+workbook_structure",
+                "header": "LTD",
+                "column": "D",
+                "confidence": 0.95
+            }
+        ],
+        "currencies_table": [
+            {
+                "entity": "INC",
+                "currency": "USD",
+                "sheet": "FS",
+                "header": "INC",
+                "column": "J",
+                "confidence": 0.9,
+                "source": "sheet_company+sheet_currency+workbook_structure"
+            },
+            {
+                "entity": "LTD",
+                "currency": "NIS",
+                "sheet": "FS",
+                "header": "LTD",
+                "column": "D",
+                "confidence": 0.95,
+                "source": "sheet_company+sheet_currency+workbook_structure"
+            }
+        ],
+        "workbook_structure_entities": [
+            {
+                "name": "LTD",
+                "currency": "NIS",
+                "confidence": 0.9,
+                "evidence": [
+                    "FS!B4 references WP_LTD",
+                    "Header 'In NIS'",
+                    "Column labeled 'LTD'"
+                ]
+            },
+            {
+                "name": "INC",
+                "currency": "USD",
+                "confidence": 0.9,
+                "evidence": [
+                    "FS sheet columns labeled 'INC' and '$'",
+                    "Formulas reference GL_INC"
+                ]
+            }
+        ]
+    },
+    "final_render": {
+        "text": "EXTRACTION STATUS: ~ PARTIAL\n  Main sheet     : FS\n  Sheets         : 1\n  Key columns    : 3 found / 5 expected\n  Matches        : 3 exact | 0 partial | 2 missing\n  Entities found : 2  |  Consolidated: yes  |  AJE: yes  |  NIS: yes\n  Blocking flags : missing_entity_column, consolidated_without_entities, aje_without_entity_columns\n\nCOMPARISON: 5 expected | 3 exact | 0 partial | 2 missing | completeness 60.0%\n  EXACT:\n    ✓ coa_name             entity=-           → col C  conf=0.95\n    ✓ aje                  entity=-           → col K  conf=0.70\n    ✓ consolidated         entity=-           → col M  conf=0.73\n  MISSING:\n    ✗ entity_value         entity=LTD         — not found\n    ✗ entity_value         entity=INC         — not found\n\nSHEET: FS | Contains: BS | Unit: NIS | Data rows: 10-186\n\nCOLUMN: C(3) | Role: coa_name | Entity:  | Currency:  | Period: 2022-12-31 | Header: Account name / description | Formula:  | RowStart: 10 | RowEnd: 59 | SheetName: FS\nCOLUMN: K(11) | Role: aje | Entity:  | Currency:  | Period: 2022-12-31 | Header: AJE | Formula:  | RowStart: 167 | RowEnd: 186 | SheetName: FS\nCOLUMN: M(13) | Role: consolidated | Entity: Consolidated | Currency: USD | Period: 2022-12-31 | Header: Consolidated | $ | Formula:  | RowStart: 167 | RowEnd: 186 | SheetName: FS\nCOLUMN: P(16) | Role: budget | Entity:  | Currency:  | Period: 2022-12-31 | Header: Budget | Formula:  | RowStart: 167 | RowEnd: 186 | SheetName: FS\n\nMAIN_SHEET: FS\nENTITIES: 2 entities: LTD, INC\nCONSOLIDATED: yes - formula pattern: =SUM(E11+I11)\nAJE: yes - types found: per-entity\nNIS: yes\n\nCOMPANIES:\n  ENTITY: INC | Sheet: FS | Column: J | Header: INC | Source: sheet_company+workbook_structure | Confidence: 0.950\n  ENTITY: LTD | Sheet: FS | Column: D | Header: LTD | Source: sheet_company+workbook_structure | Confidence: 0.950\n\nCURRENCIES:\n  ENTITY: INC | Currency: USD | Sheet: FS | Column: J | Source: sheet_company+sheet_currency+workbook_structure | Confidence: 0.900\n  ENTITY: LTD | Currency: NIS | Sheet: FS | Column: D | Source: sheet_company+sheet_currency+workbook_structure | Confidence: 0.950",
+        "sheets_count": 1,
+        "columns_count": 4,
+        "entities_count": 2,
+        "key_columns_table": [
+            {
+                "column": "C",
+                "sheet": "FS",
+                "role": "coa_name",
+                "entity": "",
+                "currency": "",
+                "row_start": 10,
+                "row_end": 59,
+                "header": "Account name / description",
+                "formula": "",
+                "confidence": 0.95
+            },
+            {
+                "column": "K",
+                "sheet": "FS",
+                "role": "aje",
+                "entity": "",
+                "currency": "",
+                "row_start": 167,
+                "row_end": 186,
+                "header": "AJE",
+                "formula": "",
+                "confidence": 0.7
+            },
+            {
+                "column": "M",
+                "sheet": "FS",
+                "role": "consolidated",
+                "entity": "Consolidated",
+                "currency": "USD",
+                "row_start": 167,
+                "row_end": 186,
+                "header": "Consolidated | $",
+                "formula": "",
+                "confidence": 0.73
+            }
+        ],
+        "all_columns_table": [
+            {
+                "column": "C",
+                "index": 3,
+                "sheet": "FS",
+                "role": "coa_name",
+                "entity": "",
+                "currency": "",
+                "period": "2022-12-31",
+                "row_start": 10,
+                "row_end": 59,
+                "header": "Account name / description",
+                "formula": "",
+                "confidence": 0.95
+            },
+            {
+                "column": "K",
+                "index": 11,
+                "sheet": "FS",
+                "role": "aje",
+                "entity": "",
+                "currency": "",
+                "period": "2022-12-31",
+                "row_start": 167,
+                "row_end": 186,
+                "header": "AJE",
+                "formula": "",
+                "confidence": 0.7
+            },
+            {
+                "column": "M",
+                "index": 13,
+                "sheet": "FS",
+                "role": "consolidated",
+                "entity": "Consolidated",
+                "currency": "USD",
+                "period": "2022-12-31",
+                "row_start": 167,
+                "row_end": 186,
+                "header": "Consolidated | $",
+                "formula": "",
+                "confidence": 0.73
+            },
+            {
+                "column": "P",
+                "index": 16,
+                "sheet": "FS",
+                "role": "budget",
+                "entity": "",
+                "currency": "",
+                "period": "2022-12-31",
+                "row_start": 167,
+                "row_end": 186,
+                "header": "Budget",
+                "formula": "",
+                "confidence": 0.68
+            }
+        ],
+        "companies_table": [
+            {
+                "entity": "INC",
+                "sheet": "FS",
+                "source": "sheet_company+workbook_structure",
+                "header": "INC",
+                "column": "J",
+                "confidence": 0.95
+            },
+            {
+                "entity": "LTD",
+                "sheet": "FS",
+                "source": "sheet_company+workbook_structure",
+                "header": "LTD",
+                "column": "D",
+                "confidence": 0.95
+            }
+        ],
+        "currencies_table": [
+            {
+                "entity": "INC",
+                "currency": "USD",
+                "sheet": "FS",
+                "header": "INC",
+                "column": "J",
+                "confidence": 0.9,
+                "source": "sheet_company+sheet_currency+workbook_structure"
+            },
+            {
+                "entity": "LTD",
+                "currency": "NIS",
+                "sheet": "FS",
+                "header": "LTD",
+                "column": "D",
+                "confidence": 0.95,
+                "source": "sheet_company+sheet_currency+workbook_structure"
+            }
+        ],
+        "summary": {
+            "status": "partial",
+            "main_sheet": "FS",
+            "sheets_processed": 1,
+            "expected_key_columns": 5,
+            "actual_key_columns": 3,
+            "exact_matches": 3,
+            "partial_matches": 0,
+            "missing_columns": 2,
+            "entities_found": 2,
+            "has_consolidated": true,
+            "has_aje": true,
+            "has_nis": true,
+            "quality_flag_count": 7,
+            "blocking_flags": [
+                "missing_entity_column",
+                "consolidated_without_entities",
+                "aje_without_entity_columns"
+            ]
+        },
+        "comparison": {
+            "exact": [
+                {
+                    "expected": {
+                        "role": "coa_name",
+                        "entity": "",
+                        "currency": "",
+                        "source": "always_expected"
+                    },
+                    "match_type": "exact",
+                    "actual_column": {
+                        "column": "C",
+                        "index": 3,
+                        "sheet": "FS",
+                        "role": "coa_name",
+                        "entity": "",
+                        "currency": "",
+                        "period": "2022-12-31",
+                        "row_start": 10,
+                        "row_end": 59,
+                        "header": "Account name / description",
+                        "formula": "",
+                        "confidence": 0.95
+                    },
+                    "notes": ""
+                },
+                {
+                    "expected": {
+                        "role": "aje",
+                        "entity": "",
+                        "currency": "",
+                        "source": "workbook_structure.has_aje"
+                    },
+                    "match_type": "exact",
+                    "actual_column": {
+                        "column": "K",
+                        "index": 11,
+                        "sheet": "FS",
+                        "role": "aje",
+                        "entity": "",
+                        "currency": "",
+                        "period": "2022-12-31",
+                        "row_start": 167,
+                        "row_end": 186,
+                        "header": "AJE",
+                        "formula": "",
+                        "confidence": 0.7
+                    },
+                    "notes": ""
+                },
+                {
+                    "expected": {
+                        "role": "consolidated",
+                        "entity": "",
+                        "currency": "",
+                        "source": "workbook_structure.has_consolidated"
+                    },
+                    "match_type": "exact",
+                    "actual_column": {
+                        "column": "M",
+                        "index": 13,
+                        "sheet": "FS",
+                        "role": "consolidated",
+                        "entity": "Consolidated",
+                        "currency": "USD",
+                        "period": "2022-12-31",
+                        "row_start": 167,
+                        "row_end": 186,
+                        "header": "Consolidated | $",
+                        "formula": "",
+                        "confidence": 0.73
+                    },
+                    "notes": ""
+                }
+            ],
+            "partial": [],
+            "missing": [
+                {
+                    "expected": {
+                        "role": "entity_value",
+                        "entity": "LTD",
+                        "currency": "NIS",
+                        "source": "workbook_structure.entities[LTD]"
+                    },
+                    "match_type": "missing",
+                    "actual_column": null,
+                    "notes": "No column with role='entity_value' found in any sheet"
+                },
+                {
+                    "expected": {
+                        "role": "entity_value",
+                        "entity": "INC",
+                        "currency": "USD",
+                        "source": "workbook_structure.entities[INC]"
+                    },
+                    "match_type": "missing",
+                    "actual_column": null,
+                    "notes": "No column with role='entity_value' found in any sheet"
+                }
+            ]
+        },
+        "normalized_output": [
+            {
+                "expected_role": "aje",
+                "expected_entity": "",
+                "expected_currency": "",
+                "match_type": "exact",
+                "notes": "",
+                "source": "workbook_structure.has_aje",
+                "column": "K",
+                "sheet": "FS",
+                "actual_role": "aje",
+                "actual_entity": "",
+                "actual_currency": "",
+                "header": "AJE",
+                "confidence": 0.7,
+                "row_start": 167,
+                "row_end": 186
+            },
+            {
+                "expected_role": "coa_name",
+                "expected_entity": "",
+                "expected_currency": "",
+                "match_type": "exact",
+                "notes": "",
+                "source": "always_expected",
+                "column": "C",
+                "sheet": "FS",
+                "actual_role": "coa_name",
+                "actual_entity": "",
+                "actual_currency": "",
+                "header": "Account name / description",
+                "confidence": 0.95,
+                "row_start": 10,
+                "row_end": 59
+            },
+            {
+                "expected_role": "consolidated",
+                "expected_entity": "",
+                "expected_currency": "",
+                "match_type": "exact",
+                "notes": "",
+                "source": "workbook_structure.has_consolidated",
+                "column": "M",
+                "sheet": "FS",
+                "actual_role": "consolidated",
+                "actual_entity": "Consolidated",
+                "actual_currency": "USD",
+                "header": "Consolidated | $",
+                "confidence": 0.73,
+                "row_start": 167,
+                "row_end": 186
+            },
+            {
+                "expected_role": "entity_value",
+                "expected_entity": "LTD",
+                "expected_currency": "NIS",
+                "match_type": "missing",
+                "notes": "No column with role='entity_value' found in any sheet",
+                "source": "workbook_structure.entities[LTD]",
+                "column": "",
+                "sheet": "",
+                "actual_role": "",
+                "actual_entity": "",
+                "actual_currency": "",
+                "header": "",
+                "confidence": 0.0,
+                "row_start": null,
+                "row_end": null
+            },
+            {
+                "expected_role": "entity_value",
+                "expected_entity": "INC",
+                "expected_currency": "USD",
+                "match_type": "missing",
+                "notes": "No column with role='entity_value' found in any sheet",
+                "source": "workbook_structure.entities[INC]",
+                "column": "",
+                "sheet": "",
+                "actual_role": "",
+                "actual_entity": "",
+                "actual_currency": "",
+                "header": "",
+                "confidence": 0.0,
+                "row_start": null,
+                "row_end": null
+            }
+        ]
+    }
+}

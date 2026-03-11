@@ -1,3 +1,5 @@
+
+# Multi_agen\packages\agents\react_sheet_analyzer.py
 from __future__ import annotations
 
 import json
@@ -11,6 +13,7 @@ from Multi_agen.packages.core import ALLOWED_COLUMN_ROLES, normalize_text
 from Multi_agen.packages.llm import LLMClient, LLMMessage
 from Multi_agen.packages.llm.prompts import build_sheet_analysis_messages
 from Multi_agen.packages.llm.stage_prompts import StagePromptProfile
+from Multi_agen.packages.core.search_config import ColumnSearchConfig
 
 logger = logging.getLogger("multi_agen.agents.react_sheet_analyzer")
 
@@ -87,9 +90,11 @@ class ReActSheetAnalyzer:
         self,
         llm: Optional[LLMClient] = None,
         config: Optional[ReActAnalyzerConfig] = None,
+        search_config: Optional[ColumnSearchConfig] = None
     ) -> None:
         self.config = config or ReActAnalyzerConfig()
         self.llm = llm
+        self.search_config = search_config or ColumnSearchConfig()
 
     def set_llm(self, llm: LLMClient) -> None:
         self.llm = llm
