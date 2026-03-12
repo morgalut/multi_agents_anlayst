@@ -120,14 +120,72 @@ class ToolRouter:
         nrows: int,
         ncols: int,
     ) -> List[List[Optional[str]]]:
-        logger.info("ToolRouter:excel_get_formulas sheet=%s", sheet_name)
+        logger.info(
+            "ToolRouter:excel_get_formulas sheet=%s row0=%d col0=%d nrows=%d ncols=%d",
+            sheet_name, row0, col0, nrows, ncols,
+        )
+
         try:
             result = self._excel.get_formulas(sheet_name, row0, col0, nrows, ncols)
             logger.info("ToolRouter:excel_get_formulas ok rows=%d", len(result))
             return result
+
+        except Exception as exc:
+            logger.exception(
+                "ToolRouter:excel_get_formulas FAILED first_attempt sheet=%s",
+                sheet_name,
+            )
+
+            # Retry once with a smaller preview window
+            small_nrows = max(1, min(nrows, 5))
+            small_ncols = max(1, min(ncols, 8))
+
+            if small_nrows == nrows and small_ncols == ncols:
+                raise
+
+            try:
+                logger.info(
+                    "ToolRouter:excel_get_formulas retry_small sheet=%s nrows=%d ncols=%d",
+                    sheet_name, small_nrows, small_ncols,
+                )
+                result = self._excel.get_formulas(
+                    sheet_name=sheet_name,
+                    row0=row0,
+                    col0=col0,
+                    nrows=small_nrows,
+                    ncols=small_ncols,
+                )
+                logger.info(
+                    "ToolRouter:excel_get_formulas retry_small ok rows=%d",
+                    len(result),
+                )
+                return result
+            except Exception:
+                logger.exception(
+                    "ToolRouter:excel_get_formulas FAILED retry_small sheet=%s",
+                    sheet_name,
+                )
+                raise exc
+
+    def excel_get_formulas_safe(
+        self,
+        sheet_name: str,
+        row0: int,
+        col0: int,
+        nrows: int,
+        ncols: int,
+    ) -> List[List[Optional[str]]]:
+        try:
+            return self.excel_get_formulas(
+                sheet_name=sheet_name,
+                row0=row0,
+                col0=col0,
+                nrows=nrows,
+                ncols=ncols,
+            )
         except Exception:
-            logger.exception("ToolRouter:excel_get_formulas FAILED sheet=%s", sheet_name)
-            raise
+            logger.exception("ToolRouter:excel_get_formulas_safe FAILED sheet=%s", sheet_name)
+            return []
 
     def excel_find_text(
         self,

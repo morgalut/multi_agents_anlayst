@@ -7,8 +7,15 @@ from ..types import ToolSpec
 
 def tool_list_sheets(workbook_provider) -> ToolSpec:
     def handler(args: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
-        wb = workbook_provider.open(ctx["workbook_path"])
-        return {"sheets": list(wb.sheetnames)}
+        workbook_path = ctx.get("workbook_path", "")
+        if not workbook_path:
+            raise ValueError("Missing required context: workbook_path")
+
+        wb = workbook_provider.open_for_read(workbook_path, data_only=False)
+        try:
+            return {"sheets": list(wb.sheetnames)}
+        finally:
+            workbook_provider.close_quietly(wb)
 
     return ToolSpec(
         name="excel.list_sheets",

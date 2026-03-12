@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 import json
+import socket
 
 try:
     from urllib.error import HTTPError, URLError
@@ -137,6 +138,12 @@ class ExcelMCPClient:
         nrows: int,
         ncols: int,
     ) -> List[List[Optional[str]]]:
+        # Defensive clamping for preview-style usage
+        row0 = max(0, int(row0))
+        col0 = max(0, int(col0))
+        nrows = max(1, min(int(nrows), 50))
+        ncols = max(1, min(int(ncols), 50))
+
         args = {
             "sheet_name": sheet_name,
             "row0": row0,
@@ -144,14 +151,27 @@ class ExcelMCPClient:
             "nrows": nrows,
             "ncols": ncols,
         }
+
         resp = self._call_tool("excel.get_formulas", args)
         formulas = self._extract_list(resp, keys=("formulas",))
+
         normalized: List[List[Optional[str]]] = []
         for row in formulas:
             if isinstance(row, (list, tuple)):
                 normalized.append([None if v is None else str(v) for v in row])
             else:
                 normalized.append([None if row is None else str(row)])
+
+        # Normalize exact rectangular shape
+        while len(normalized) < nrows:
+            normalized.append([None] * ncols)
+
+        for row in normalized:
+            if len(row) < ncols:
+                row.extend([None] * (ncols - len(row)))
+            elif len(row) > ncols:
+                del row[ncols:]
+
         return normalized
 
     def find_text(self, sheet_name: str, query: str, max_hits: int = 50) -> List[Dict[str, Any]]:
@@ -171,56 +191,88 @@ class ExcelMCPClient:
     def _call_tool(self, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         ctx = self._build_ctx()
 
-        try:
-            resp = self._t.call_tool(self._cfg.server_id, tool_name, args, ctx=ctx)
-        except HTTPError as exc:
-            body = self._read_http_error_body(exc)
-            raise ExcelClientError(
-                f"MCP tool failed with HTTP {getattr(exc, 'code', None)}: {tool_name}",
-                server_id=self._cfg.server_id,
-                tool_name=tool_name,
-                args=args,
-                status_code=getattr(exc, "code", None),
-                response_body=body,
-                cause=exc,
-            ) from exc
-        except URLError as exc:
-            raise ExcelClientError(
-                f"MCP transport error calling tool: {tool_name}",
-                server_id=self._cfg.server_id,
-                tool_name=tool_name,
-                args=args,
-                response_body=str(exc),
-                cause=exc,
-            ) from exc
-        except Exception as exc:
-            raise ExcelClientError(
-                f"Unexpected MCP error calling tool: {tool_name}",
-                server_id=self._cfg.server_id,
-                tool_name=tool_name,
-                args=args,
-                cause=exc,
-            ) from exc
+        attempts = 2 if tool_name == "excel.get_formulas" else 1
+        last_exc: Optional[BaseException] = None
 
-        if not isinstance(resp, dict):
+        for attempt in range(1, attempts + 1):
+            try:
+                resp = self._t.call_tool(self._cfg.server_id, tool_name, args, ctx=ctx)
+
+                if not isinstance(resp, dict):
+                    raise ExcelClientError(
+                        f"Invalid MCP response type for tool: {tool_name}",
+                        server_id=self._cfg.server_id,
+                        tool_name=tool_name,
+                        args=args,
+                        response_body=repr(resp),
+                    )
+
+                if "error" in resp and resp["error"]:
+                    raise ExcelClientError(
+                        f"MCP tool returned logical error: {tool_name}",
+                        server_id=self._cfg.server_id,
+                        tool_name=tool_name,
+                        args=args,
+                        response_body=self._stringify(resp["error"]),
+                    )
+
+                return resp
+
+            except HTTPError as exc:
+                body = self._read_http_error_body(exc)
+                raise ExcelClientError(
+                    f"MCP tool failed with HTTP {getattr(exc, 'code', None)}: {tool_name}",
+                    server_id=self._cfg.server_id,
+                    tool_name=tool_name,
+                    args=args,
+                    status_code=getattr(exc, "code", None),
+                    response_body=body,
+                    cause=exc,
+                ) from exc
+
+            except (TimeoutError, socket.timeout) as exc:
+                last_exc = exc
+                if attempt < attempts:
+                    continue
+                raise ExcelClientError(
+                    f"MCP timeout calling tool: {tool_name}",
+                    server_id=self._cfg.server_id,
+                    tool_name=tool_name,
+                    args=args,
+                    cause=exc,
+                ) from exc
+
+            except URLError as exc:
+                raise ExcelClientError(
+                    f"MCP transport error calling tool: {tool_name}",
+                    server_id=self._cfg.server_id,
+                    tool_name=tool_name,
+                    args=args,
+                    response_body=str(exc),
+                    cause=exc,
+                ) from exc
+
+            except ExcelClientError:
+                raise
+
+            except Exception as exc:
+                raise ExcelClientError(
+                    f"Unexpected MCP error calling tool: {tool_name}",
+                    server_id=self._cfg.server_id,
+                    tool_name=tool_name,
+                    args=args,
+                    cause=exc,
+                ) from exc
+
+        if last_exc is not None:
             raise ExcelClientError(
-                f"Invalid MCP response type for tool: {tool_name}",
+                f"MCP timeout calling tool: {tool_name}",
                 server_id=self._cfg.server_id,
                 tool_name=tool_name,
                 args=args,
-                response_body=repr(resp),
+                cause=last_exc,
             )
-
-        if "error" in resp and resp["error"]:
-            raise ExcelClientError(
-                f"MCP tool returned logical error: {tool_name}",
-                server_id=self._cfg.server_id,
-                tool_name=tool_name,
-                args=args,
-                response_body=self._stringify(resp["error"]),
-            )
-
-        return resp
+        raise RuntimeError("unreachable")
 
     def _build_ctx(self) -> Dict[str, Any]:
         workbook_path = (self._workbook_path or "").strip()

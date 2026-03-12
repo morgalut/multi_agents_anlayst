@@ -27,9 +27,11 @@ class SheetProfileMapperConfig:
     # Sheet-name fragments that identify GL sheets
     gl_name_fragments: Tuple[str, ...] = ("gl", "ledger", "general ledger")
     # Sheet-name fragments that identify AJE card sheets
-    aje_card_name_fragments: Tuple[str, ...] = ("ae", "aje", "adjust", "adjusting")
+    # FIX MAPPER-4: "ae" removed — AE is a card sheet, NOT an AJE-ledger-card sheet
+    aje_card_name_fragments: Tuple[str, ...] = ("aje", "adjust", "adjusting")
     # Sheet-name fragments that identify generic card / TB sheets
-    card_name_fragments: Tuple[str, ...] = ("tb", "trial balance", "card", "כרטיס")
+    # FIX MAPPER-4: "ae" moved here
+    card_name_fragments: Tuple[str, ...] = ("ae", "tb", "trial balance", "card", "כרטיס")
     # Minimum debit+credit column count to infer is_aje_card_sheet from content
     aje_card_debit_credit_min: int = 2
 
@@ -48,18 +50,18 @@ class SheetProfileMapper:
         profile = mapper.map_profile(task=task, analysis=analysis, is_main_sheet=True)
     """
 
-    # Maps existing column roles to (column_type_template, is_tb, debit_flag, credit_flag)
-    _ROLE_TYPE_MAP: Dict[str, Tuple[str, Optional[bool], Optional[bool], Optional[bool]]] = {
-        "coa_name":         ("Account name",    False,  None,  None),
-        "entity_value":     ("{entity} {curr}", True,   None,  None),
-        "debit":            ("Debit {curr}",    False,  True,  False),
-        "credit":           ("Credit {curr}",   False,  False, True),
-        "aje":              ("AJE {entity}",    False,  None,  None),
-        "consolidated_aje": ("AJE Consolidated",False,  None,  None),
-        "consolidated":     ("Consolidated",    False,  None,  None),
-        "budget":           ("Budget",          False,  None,  None),
-        "prior_period":     ("Prior Period",    False,  None,  None),
-        "other":            ("Details",         False,  None,  None),
+    # Maps existing column roles to a human-readable type template
+    _ROLE_TYPE_MAP: Dict[str, str] = {
+        "coa_name":         "Account name",
+        "entity_value":     "{entity} {curr}",
+        "debit":            "Debit {curr}",
+        "credit":           "Credit {curr}",
+        "aje":              "AJE {entity}",
+        "consolidated_aje": "AJE Consolidated",
+        "consolidated":     "Consolidated",
+        "budget":           "Budget",
+        "prior_period":     "Prior Period",
+        "other":            "Details",
     }
 
     # Currency symbols used in human-readable labels
@@ -105,10 +107,11 @@ class SheetProfileMapper:
 
         # ------------------------------------------------------------------
         # 2. Per-column profiles
+        # FIX MAPPER-5: pass is_card into every _map_column call
         # ------------------------------------------------------------------
         profile_columns: List[Any] = []  # List[SheetProfileColumn]
         for col in raw_columns:
-            pc = self._map_column(col, sheet_name=sheet_name)
+            pc = self._map_column(col, sheet_name=sheet_name, is_card=is_card)
             if pc is not None:
                 profile_columns.append(pc)
 
@@ -147,13 +150,22 @@ class SheetProfileMapper:
         self, sheet_name: str, columns: List[Dict[str, Any]]
     ) -> bool:
         lower = sheet_name.lower()
+        # FIX MAPPER-4: name-only check, no content fallback that bleeds "ae" in
         name_hit = any(frag in lower for frag in self.config.aje_card_name_fragments)
         if name_hit:
             return True
 
         # Content heuristic: sheet has both debit and credit AJE columns
-        has_debit  = any(c.get("role") in ("debit", "aje") and "debit" in str(c.get("header_text", "")).lower() for c in columns)
-        has_credit = any(c.get("role") in ("credit", "aje") and "credit" in str(c.get("header_text", "")).lower() for c in columns)
+        has_debit  = any(
+            c.get("role") in ("debit", "aje")
+            and "debit" in str(c.get("header_text", "")).lower()
+            for c in columns
+        )
+        has_credit = any(
+            c.get("role") in ("credit", "aje")
+            and "credit" in str(c.get("header_text", "")).lower()
+            for c in columns
+        )
         debit_credit_count = sum(
             1 for c in columns if c.get("role") in ("debit", "credit")
         )
@@ -174,6 +186,7 @@ class SheetProfileMapper:
         col: Dict[str, Any],
         *,
         sheet_name: str,
+        is_card: bool = False,   # FIX MAPPER-5: new parameter
     ) -> Optional[Any]:  # returns Optional[SheetProfileColumn]
         SheetProfileColumn, _ = _import_profile_types()
 
@@ -195,14 +208,17 @@ class SheetProfileMapper:
 
         # ── currency/company for profile ───────────────────────────────
         profile_currency = currency or None
-        profile_company  = (entity if entity and entity.lower() != "consolidated" else None) or None
+        # FIX MAPPER-3: entity_value with no entity → False (bool), not None
+        profile_company  = self._derive_company(role=role, entity=entity)
 
         # ── boolean annotations ────────────────────────────────────────
+        # FIX MAPPER-5: pass is_card so card-sheet rules apply
         is_tb, is_aje_debit, is_aje_credit, is_consolidated, is_final = (
-            self._derive_booleans(role=role, entity=entity, header=header, currency=currency)
+            self._derive_booleans(role=role, entity=entity, header=header,
+                                  currency=currency, is_card=is_card)
         )
         is_account_number, is_account_description = self._derive_account_flags(
-            role=role, header=header
+            role=role, header=header, is_card=is_card
         )
 
         return SheetProfileColumn(
@@ -234,16 +250,22 @@ class SheetProfileMapper:
         """
         Produce a human-readable column_type label matching the example format.
 
-        Priority: explicit header keywords > role-based template.
+        Priority:
+          1. Debit/Credit keyword in header — symbol extracted FROM header text
+             (not re-derived from currency code, so "Debit $" stays "Debit $"
+              even when currency=NIS)
+          2. Explicit header keywords (AE #, Account #, Account name, Details …)
+          3. Role-based template
         """
         header_lower = header.lower()
-        curr_sym = self._currency_symbol(currency)
 
-        # Explicit debit / credit keywords in header beat role
+        # Debit / Credit: symbol must come from the header itself first
         if "debit" in header_lower:
-            return f"Debit {curr_sym}".strip() if curr_sym else "Debit"
+            sym = self._symbol_from_header(header) or self._currency_symbol(currency)
+            return f"Debit {sym}".strip() if sym else "Debit"
         if "credit" in header_lower:
-            return f"Credit {curr_sym}".strip() if curr_sym else "Credit"
+            sym = self._symbol_from_header(header) or self._currency_symbol(currency)
+            return f"Credit {sym}".strip() if sym else "Credit"
 
         # Account-number / AE number signals
         if re.search(r"\b(ae|aje)\s*#", header_lower):
@@ -252,24 +274,53 @@ class SheetProfileMapper:
             return "Account #"
         if "account name" in header_lower or "account description" in header_lower:
             return "Account name"
-        if "details" in header_lower or "remarks" in header_lower or "description" in header_lower:
+        # FIX: "description" removed — too broad, catches "Account name / description"
+        if "details" in header_lower or "remarks" in header_lower:
             return "Details"
         if "expense" in header_lower and ("amount" in header_lower or "total" in header_lower):
             return "Expense Amount"
 
         # Role-based template
-        tpl_entry = self._ROLE_TYPE_MAP.get(role)
-        if tpl_entry is None:
+        tpl = self._ROLE_TYPE_MAP.get(role)
+        if tpl is None:
             return header or "Column"
 
-        tpl = tpl_entry[0]
+        curr_sym = self._currency_symbol(currency)
         label = tpl.replace("{entity}", entity or "").replace("{curr}", curr_sym or currency).strip()
-        # Clean up redundant whitespace
         label = re.sub(r"\s{2,}", " ", label).strip()
         return label or (header or role or "Column")
 
     def _currency_symbol(self, currency: str) -> str:
         return self._CURRENCY_SYMBOL.get(currency.upper(), currency)
+
+    def _symbol_from_header(self, header: str) -> str:
+        """Extract a currency symbol directly from the header text."""
+        for sym in ("₪", "$", "€", "£", "¥"):
+            if sym in header:
+                return sym
+        return ""
+
+    # ------------------------------------------------------------------
+    # Company field derivation
+    # ------------------------------------------------------------------
+
+    def _derive_company(self, *, role: str, entity: str) -> Any:
+        """
+        FIX MAPPER-3: Three-way distinction:
+          - entity present and not "Consolidated" → return entity str
+          - entity == "Consolidated"              → return None (filtered label)
+          - role == entity_value and entity == "" → return False (bool)
+            meaning: "we looked for a company but found none"
+          - all other roles with no entity        → return None (N/A)
+        """
+        if entity and entity.lower() != "consolidated":
+            return entity
+        if entity and entity.lower() == "consolidated":
+            return None  # "Consolidated" is a label, not a company entity
+        # entity is empty
+        if role == "entity_value":
+            return False  # bool False: evaluated, no company found
+        return None  # structural / identifier column — company is N/A
 
     # ------------------------------------------------------------------
     # Boolean annotation derivation
@@ -282,6 +333,7 @@ class SheetProfileMapper:
         entity: str,
         header: str,
         currency: str,
+        is_card: bool = False,   # FIX MAPPER-5
     ) -> Tuple[
         Optional[bool],   # is_tb
         Optional[bool],   # is_aje_debit
@@ -298,7 +350,8 @@ class SheetProfileMapper:
         is_final:        Optional[bool] = None
 
         if role == "coa_name":
-            is_tb = False
+            # FIX MAPPER-1: Account # and Account name ARE TB reference columns
+            is_tb = True
             is_aje_debit  = None
             is_aje_credit = None
             is_consolidated = None
@@ -306,8 +359,17 @@ class SheetProfileMapper:
 
         elif role == "entity_value":
             is_tb = True
-            is_aje_debit  = False
-            is_aje_credit = False
+            # On a card sheet, entity_value is typically the credit side
+            if is_card:
+                if "debit" in h:
+                    is_aje_debit  = True
+                    is_aje_credit = False
+                else:
+                    is_aje_debit  = False
+                    is_aje_credit = True
+            else:
+                is_aje_debit  = False
+                is_aje_credit = False
             is_consolidated = False
             is_final = False
 
@@ -343,7 +405,7 @@ class SheetProfileMapper:
         elif role in ("consolidated", "consolidated_aje"):
             is_tb = False
             is_consolidated = True
-            is_final = role == "consolidated"  # consolidated (non-AJE) is often the final column
+            is_final = role == "consolidated"
             if role == "consolidated_aje":
                 if "debit" in h:
                     is_aje_debit  = True
@@ -358,7 +420,7 @@ class SheetProfileMapper:
             is_consolidated = False
 
         elif role == "prior_period":
-            is_tb = True   # prior period TB columns are still TB
+            is_tb = True   # prior-period TB columns are still TB
             is_final = False
             is_consolidated = False
 
@@ -366,7 +428,9 @@ class SheetProfileMapper:
             is_tb = False
             is_aje_debit  = None
             is_aje_credit = None
-            is_consolidated = False
+            # Sequence-number columns (AE #, entry #) have no consolidated meaning
+            is_seq = bool(re.search(r"\b(ae|aje|entry|seq|ref|no\.?)\s*#", h))
+            is_consolidated = None if is_seq else False
             is_final = False
 
         return is_tb, is_aje_debit, is_aje_credit, is_consolidated, is_final
@@ -376,12 +440,21 @@ class SheetProfileMapper:
         *,
         role: str,
         header: str,
+        is_card: bool = False,   # FIX MAPPER-5
     ) -> Tuple[Optional[bool], Optional[bool]]:
-        """Returns (is_account_number, is_account_description)."""
+        """Returns (is_account_number, is_account_description).
+
+        FIX MAPPER-2: All monetary/value/descriptor columns are at account-description
+        granularity.  Previously only coa_name and "other" returned True;
+        aje/consolidated/budget/entity_value/debit/credit all fell through to (False, False).
+        """
+        # FIX MAPPER-5: on a card sheet every column is at account-description level
+        if is_card:
+            return False, True
+
         h = header.lower()
 
         if role == "coa_name":
-            # Account names: could be description or number depending on header
             if re.search(r"\bnumber\b|\b#\b|\bcode\b|\bnum\b", h):
                 return True, False
             return False, True
@@ -391,11 +464,14 @@ class SheetProfileMapper:
                 return True, False
             return False, True
 
-        if role == "other":
-            # Details / description columns
+        # FIX MAPPER-2: every value/descriptor role is account-level
+        if role in (
+            "entity_value", "debit", "credit",
+            "aje", "consolidated_aje", "consolidated",
+            "budget", "prior_period", "other",
+        ):
             return False, True
 
-        # Default: not an account column
         return False, False
 
     # ------------------------------------------------------------------
@@ -414,7 +490,6 @@ class SheetProfileMapper:
     ) -> str:
         """
         Build a plain-English summary of what this sheet appears to contain.
-
         Mirrors the style of additional_info_on_sheet in exmplete.json.
         """
         parts: List[str] = []

@@ -43,7 +43,6 @@ class OrcConfig:
     enable_expert_arbitration: bool = True
     enable_company_extraction: bool = True
     enable_currency_extraction: bool = True
-    # NEW: toggle for the parallel sheet-profile export path
     enable_sheet_profile_export: bool = True
 
 
@@ -69,11 +68,14 @@ class ORCAgent:
       2. workbook structure analysis
       3. detect sheet tasks
       4. per-sheet: analyze → company → currency → quality_audit → map_roles → arbitrate
-         ↳ NEW: also map_sheet_profile (parallel export path)
+         ↳ also map_sheet_profile (parallel export path)
       5. aggregate WorkbookExtractionResult  (existing path)
          aggregate WorkbookSheetProfilesResult  (NEW path)
       6. final render (existing path)
-         sheet-profile result stored on state (NEW path)
+         sheet-profile result stored on state + serialised to response (NEW path)
+
+    FIX ORC-2: workbook_structure.entities now injected into sheet_analysis prompt.
+    FIX ORC-1: sheet_profiles_result now included in the serialised HTTP response.
     """
 
     def __init__(
@@ -91,7 +93,6 @@ class ORCAgent:
         prompt_registry: Optional[Any] = None,
         prompt_policy: Optional[OrcPromptPolicy] = None,
         config: Optional[OrcConfig] = None,
-        # NEW: optional sheet-profile mapper (injected; falls back to built-in)
         sheet_profile_mapper: Optional[Any] = None,
     ) -> None:
         self.tools = tools
@@ -116,7 +117,6 @@ class ORCAgent:
 
     @staticmethod
     def _build_default_profile_mapper() -> Any:
-        """Lazy-import the mapper so it's optional at import time."""
         try:
             from Multi_agen.packages.agents.sheet_profile_mapper import SheetProfileMapper
             return SheetProfileMapper()
@@ -146,6 +146,30 @@ class ORCAgent:
         except Exception:
             logger.exception("Failed to resolve prompt profile stage=%s", stage_name)
             return None
+
+    # FIX ORC-2: helper to build a sheet_analysis prompt enriched with entity hints
+    def _get_sheet_analysis_profile(self, ws_entities: List[WorkbookEntity]) -> Any:
+        """
+        Return a sheet_analysis StagePromptProfile enriched with known entity hints.
+        Falls back to plain sheet_analysis profile when registry has no enrich method.
+        """
+        if self.prompt_registry is None:
+            return None
+        # Use registry.enrich_sheet_analysis() if available (added in stage_prompts fix)
+        enrich = getattr(self.prompt_registry, "enrich_sheet_analysis", None)
+        if enrich is not None and ws_entities:
+            try:
+                entity_dicts = [
+                    {"name": str(getattr(e, "name", "") or ""),
+                     "currency": str(getattr(e, "currency", "") or "")}
+                    for e in ws_entities
+                    if str(getattr(e, "name", "") or "").strip()
+                ]
+                return enrich(known_entities=entity_dicts)
+            except Exception:
+                logger.exception("Failed to build enriched sheet_analysis profile")
+        # Fallback: plain profile
+        return self._get_prompt_profile(self.prompt_policy.sheet_analysis)
 
     def _invoke_stage_method(
         self, method: Any, *args: Any, prompt_profile: Any = None, **kwargs: Any
@@ -197,14 +221,20 @@ class ORCAgent:
         state.sheet_tasks = sheet_tasks
         logger.info("Sheet tasks detected count=%d", len(sheet_tasks))
 
+        # FIX ORC-2: extract workbook structure entities ONCE before the sheet loop
+        ws = getattr(state, "workbook_structure", None)
+        ws_entities: List[WorkbookEntity] = list(getattr(ws, "entities", []) or []) if ws else []
+
         # Stage 3: process each sheet
-        # NEW: accumulate per-sheet profile results in parallel
-        sheet_profile_map: Dict[str, Any] = {}  # sheet_name -> SheetProfileResult
+        sheet_profile_map: Dict[str, Any] = {}
 
         for i, task in enumerate(sheet_tasks):
             logger.info("Processing %d/%d sheet=%s", i + 1, len(sheet_tasks), task.sheet_name)
             try:
-                result, analysis = self._process_one_sheet_with_analysis(task, state)
+                # FIX ORC-2: pass ws_entities so sheet_analysis sees entity hints
+                result, analysis = self._process_one_sheet_with_analysis(
+                    task, state, ws_entities=ws_entities
+                )
             except Exception as exc:
                 logger.exception("Sheet failed sheet=%s", task.sheet_name)
                 if not self.config.continue_on_sheet_error:
@@ -220,7 +250,7 @@ class ORCAgent:
 
             state.add_sheet_result(result)
 
-            # NEW: build sheet profile (parallel export track)
+            # Build sheet profile (parallel export track)
             if (
                 self.config.enable_sheet_profile_export
                 and self._sheet_profile_mapper is not None
@@ -241,11 +271,10 @@ class ORCAgent:
         workbook_result = self._aggregate_workbook_result(state)
         state.set_workbook_result(workbook_result)
 
-        # Stage 5: aggregate sheet-profile result (NEW path)
+        # Stage 5: aggregate sheet-profile result
         if self.config.enable_sheet_profile_export and sheet_profile_map:
             sheet_profiles_result = WorkbookSheetProfilesResult(profiles=sheet_profile_map)
             self._stash(state, "sheet_profiles_result", "_", sheet_profiles_result)
-            # Also set as a top-level attribute for convenient access
             try:
                 object.__setattr__(state, "sheet_profiles_result", sheet_profiles_result)
             except Exception:
@@ -267,21 +296,44 @@ class ORCAgent:
         return state
 
     # ------------------------------------------------------------------
-    # Per-sheet processing  (NEW: returns analysis alongside result)
+    # Per-sheet processing
     # ------------------------------------------------------------------
 
     def _process_one_sheet_with_analysis(
-        self, task: SheetTask, state: PipelineState
+        self,
+        task: SheetTask,
+        state: PipelineState,
+        ws_entities: Optional[List[WorkbookEntity]] = None,  # FIX ORC-2: new param
     ) -> tuple:  # -> (SheetExtractionResult, SheetAnalysis)
         """
-        Thin wrapper that returns BOTH the extraction result AND the raw analysis,
-        so the profile-export track can consume the analysis signals directly.
+        FIX ORC-2: build an entity-enriched prompt profile for sheet_analysis
+        so the LLM is told about LTD, INC, etc. before it scans the grid.
         """
-        # A: broad analysis
-        analysis = self._invoke_stage_method(
-            self.sheet_analyzer.analyze, task, state, self.tools,
-            prompt_profile=self._get_prompt_profile(self.prompt_policy.sheet_analysis),
-        )
+        ws_entities = ws_entities or []
+
+        # A: broad analysis — FIX ORC-2: use enriched profile that includes entity hints
+        enriched_profile = self._get_sheet_analysis_profile(ws_entities)
+
+        # FIX ORC-2: pass known_entities as keyword arg if sheet_analyzer supports it
+        try:
+            sig = inspect.signature(self.sheet_analyzer.analyze)
+            if "known_entities" in sig.parameters:
+                analysis = self._invoke_stage_method(
+                    self.sheet_analyzer.analyze, task, state, self.tools,
+                    prompt_profile=enriched_profile,
+                    known_entities=ws_entities,
+                )
+            else:
+                analysis = self._invoke_stage_method(
+                    self.sheet_analyzer.analyze, task, state, self.tools,
+                    prompt_profile=enriched_profile,
+                )
+        except Exception:
+            # Fallback: call without extra kwargs
+            analysis = self._invoke_stage_method(
+                self.sheet_analyzer.analyze, task, state, self.tools,
+                prompt_profile=enriched_profile,
+            )
 
         # B: company extraction (main sheet only)
         company_extraction: Optional[SheetCompanyExtraction] = None
@@ -496,6 +548,97 @@ class ORCAgent:
             currencies_table=currencies_table,
             workbook_structure_entities=ws_entities,
         )
+
+    # ------------------------------------------------------------------
+    # FIX ORC-1: sheet_profiles_result serialisation helper
+    # ------------------------------------------------------------------
+
+    def build_response_dict(self, state: PipelineState) -> Dict[str, Any]:
+        """
+        Serialize PipelineState to the HTTP response dictionary.
+
+        FIX ORC-1: sheet_profiles_result is now included when present.
+
+        Call this from your API endpoint instead of manually building the dict.
+        Example (FastAPI):
+            response = orc_agent.build_response_dict(state)
+            return JSONResponse(content=response)
+        """
+        workbook_result = getattr(state, "workbook_result", None)
+        final_render    = getattr(state, "final_render",    None)
+
+        response: Dict[str, Any] = {
+            "run_id": getattr(state, "run_id", None),
+        }
+
+        # workbook_structure
+        ws = getattr(state, "workbook_structure", None)
+        if ws is not None:
+            try:
+                from dataclasses import asdict
+                response["workbook_structure"] = asdict(ws)
+            except Exception:
+                response["workbook_structure"] = str(ws)
+
+        # provenance
+        for prov_key in ("workbook_structure_provenance", "task_provenance"):
+            val = getattr(state, prov_key, None)
+            if val is not None:
+                response[prov_key] = val
+
+        # sheet_tasks
+        sheet_tasks = getattr(state, "sheet_tasks", []) or []
+        response["sheet_tasks"] = [
+            {
+                "sheet_name":        getattr(t, "sheet_name", ""),
+                "is_main_sheet":     getattr(t, "is_main_sheet", False),
+                "parent_sheet_name": getattr(t, "parent_sheet_name", None),
+            }
+            for t in sheet_tasks
+        ]
+
+        # sheet_results
+        sheet_results = getattr(state, "sheet_results", []) or []
+        try:
+            from dataclasses import asdict
+            response["sheet_results"] = [asdict(r) for r in sheet_results]
+        except Exception:
+            response["sheet_results"] = [str(r) for r in sheet_results]
+
+        # workbook_result
+        if workbook_result is not None:
+            try:
+                from dataclasses import asdict
+                response["workbook_result"] = asdict(workbook_result)
+            except Exception:
+                response["workbook_result"] = str(workbook_result)
+
+        # final_render
+        if final_render is not None:
+            try:
+                from dataclasses import asdict
+                response["final_render"] = asdict(final_render)
+            except Exception:
+                response["final_render"] = str(final_render)
+
+        # FIX ORC-1: include sheet_profiles_result in the response
+        spr = getattr(state, "sheet_profiles_result", None)
+        if spr is not None:
+            profiles = getattr(spr, "profiles", {}) or {}
+            serialized: Dict[str, Any] = {}
+            for sheet_name, profile in profiles.items():
+                try:
+                    # Use to_dict() if available, else dataclasses.asdict
+                    if hasattr(profile, "to_dict"):
+                        serialized[sheet_name] = profile.to_dict()
+                    else:
+                        from dataclasses import asdict
+                        serialized[sheet_name] = asdict(profile)
+                except Exception:
+                    logger.exception("Failed to serialize profile for sheet=%s", sheet_name)
+            response["sheet_profiles_result"] = serialized
+
+        return response
 
     # ------------------------------------------------------------------
     # Entity/currency tables

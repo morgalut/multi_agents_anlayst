@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..server import ToolSpec
+from ..types import ToolSpec
 
 _MAX_DIMENSION = 10_000
+_MAX_FORMULA_CELLS = 2_000
 _FORMULA_PREFIX = "="
 
 _INPUT_SCHEMA: dict[str, Any] = {
@@ -53,44 +54,63 @@ def tool_get_formulas(workbook_provider) -> ToolSpec:
         if not workbook_path:
             raise ValueError("Missing required context: workbook_path")
 
-        wb = workbook_provider.open(workbook_path)
+        if row0 < 0 or col0 < 0:
+            raise ValueError("row0 and col0 must be >= 0")
+        if nrows < 1 or ncols < 1:
+            raise ValueError("nrows and ncols must be >= 1")
 
-        if sheet_name not in wb.sheetnames:
-            available = ", ".join(f"'{s}'" for s in wb.sheetnames)
-            raise KeyError(f"Sheet '{sheet_name}' not found. Available sheets: {available}")
+        if nrows * ncols > _MAX_FORMULA_CELLS:
+            raise ValueError(
+                f"Requested range too large for formula scan: {nrows}x{ncols} "
+                f"({nrows*ncols} cells), max={_MAX_FORMULA_CELLS}"
+            )
 
-        ws = wb[sheet_name]
-        max_row, max_col = ws.max_row or 0, ws.max_column or 0
+        wb = workbook_provider.open_for_read(workbook_path, data_only=False)
+        try:
+            if sheet_name not in wb.sheetnames:
+                available = ", ".join(repr(s) for s in wb.sheetnames[:20])
+                raise ValueError(
+                    f"Worksheet {sheet_name!r} does not exist. Available sheets: {available}"
+                )
 
-        effective_nrows = min(nrows, max(0, max_row - row0))
-        effective_ncols = min(ncols, max(0, max_col - col0))
+            ws = wb[sheet_name]
 
-        formulas: list[list[str | None]] = []
-        formula_count = 0
+            formulas: list[list[str | None]] = []
+            formula_count = 0
 
-        for r in range(row0, row0 + effective_nrows):
-            row_out: list[str | None] = []
-            for c in range(col0, col0 + effective_ncols):
-                value = ws.cell(row=r + 1, column=c + 1).value
-                if _is_formula(value):
-                    row_out.append(value)
-                    formula_count += 1
-                else:
-                    row_out.append(None)
+            for row in ws.iter_rows(
+                min_row=row0 + 1,
+                max_row=row0 + nrows,
+                min_col=col0 + 1,
+                max_col=col0 + ncols,
+            ):
+                row_out: list[str | None] = []
+                for cell in row:
+                    value = cell.value
+                    if _is_formula(value):
+                        row_out.append(value)
+                        formula_count += 1
+                    else:
+                        row_out.append(None)
+                formulas.append(row_out)
 
-            row_out.extend([None] * (ncols - len(row_out)))
-            formulas.append(row_out)
+            while len(formulas) < nrows:
+                formulas.append([None] * ncols)
 
-        empty_row: list[None] = [None] * ncols
-        for _ in range(nrows - len(formulas)):
-            formulas.append(list(empty_row))
+            for row in formulas:
+                if len(row) < ncols:
+                    row.extend([None] * (ncols - len(row)))
+                elif len(row) > ncols:
+                    del row[ncols:]
 
-        return {"formulas": formulas, "formula_count": formula_count}
+            return {"formulas": formulas, "formula_count": formula_count}
+        finally:
+            workbook_provider.close_quietly(wb)
 
     return ToolSpec(
         name="excel.get_formulas",
         description=(
-            "Read a rectangular grid of cells from *sheet_name* and return each "
+            "Read a rectangular grid of cells from sheet_name and return each "
             "cell's formula or null if the cell does not contain a formula."
         ),
         input_schema=_INPUT_SCHEMA,

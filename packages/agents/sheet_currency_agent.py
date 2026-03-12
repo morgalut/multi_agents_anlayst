@@ -45,7 +45,6 @@ _CURRENCY_SYMBOLS: Dict[str, str] = {
     "¥": "JPY",
 }
 
-# Regex: matches USD, NIS, ILS, $ … inside a cell value
 _CURRENCY_PATTERN = re.compile(
     r"\b(USD|NIS|ILS|EUR|GBP|JPY|CHF|CAD|AUD|CNY|HKD|SGD)\b"
     r"|[$₪€£¥]",
@@ -198,26 +197,43 @@ class SheetCurrencyAgent:
         try:
             if hasattr(tools, "excel_read_sheet_range"):
                 grid = tools.excel_read_sheet_range(
-                    sheet_name=sheet_name, row0=0, col0=0,
-                    nrows=self.max_preview_rows, ncols=self.max_preview_cols,
+                    sheet_name=sheet_name,
+                    row0=0,
+                    col0=0,
+                    nrows=self.max_preview_rows,
+                    ncols=self.max_preview_cols,
                 )
         except Exception:
             logger.exception("SheetCurrencyAgent:grid_read_failed sheet=%s", sheet_name)
 
         try:
             if hasattr(tools, "excel_detect_merged_cells"):
-                merged = (tools.excel_detect_merged_cells(sheet_name=sheet_name) or [])[: self.max_merged]
+                merged = (
+                    tools.excel_detect_merged_cells(sheet_name=sheet_name) or []
+                )[: self.max_merged]
         except Exception:
             logger.exception("SheetCurrencyAgent:merged_read_failed sheet=%s", sheet_name)
 
         try:
-            if hasattr(tools, "excel_get_formulas"):
+            if hasattr(tools, "excel_get_formulas_safe"):
+                formulas = tools.excel_get_formulas_safe(
+                    sheet_name=sheet_name,
+                    row0=0,
+                    col0=0,
+                    nrows=min(self.max_preview_rows, 5),
+                    ncols=min(self.max_preview_cols, 10),
+                )
+            elif hasattr(tools, "excel_get_formulas"):
                 formulas = tools.excel_get_formulas(
-                    sheet_name=sheet_name, row0=0, col0=0,
-                    nrows=min(self.max_preview_rows, 15), ncols=self.max_preview_cols,
+                    sheet_name=sheet_name,
+                    row0=0,
+                    col0=0,
+                    nrows=min(self.max_preview_rows, 5),
+                    ncols=min(self.max_preview_cols, 10),
                 )
         except Exception:
             logger.exception("SheetCurrencyAgent:formula_read_failed sheet=%s", sheet_name)
+            formulas = []
 
         return grid, merged, formulas
 
@@ -237,7 +253,9 @@ class SheetCurrencyAgent:
     ) -> List[SheetCurrencyHit]:
         hits: List[SheetCurrencyHit] = []
 
-        # Build entity→currency prior from workbook structure
+        # formulas are currently collected defensively, but not yet used
+        _ = formulas
+
         entity_currency_prior: Dict[str, str] = {}
         if workbook_structure is not None:
             for ent in (workbook_structure.entities or []):
@@ -246,7 +264,6 @@ class SheetCurrencyAgent:
                 if name and currency:
                     entity_currency_prior[name.upper()] = currency.upper()
 
-        # Build col_idx → entity map from company extraction
         col_to_entity: Dict[int, str] = {}
         entity_hits: List[SheetEntityHit] = []
         if company_extraction is not None:
@@ -254,7 +271,6 @@ class SheetCurrencyAgent:
             for eh in entity_hits:
                 col_to_entity[eh.col_idx] = eh.entity
 
-        # --- Pass 1: scan header rows for explicit currency markers ---
         hits.extend(
             self._scan_grid_for_currencies(
                 sheet_name=sheet_name,
@@ -265,7 +281,6 @@ class SheetCurrencyAgent:
             )
         )
 
-        # --- Pass 2: scan merged cells ---
         hits.extend(
             self._scan_merged_for_currencies(
                 sheet_name=sheet_name,
@@ -276,7 +291,6 @@ class SheetCurrencyAgent:
             )
         )
 
-        # --- Pass 3: fill missing currencies from workbook structure priors ---
         hits.extend(
             self._fill_from_priors(
                 sheet_name=sheet_name,
@@ -316,7 +330,6 @@ class SheetCurrencyAgent:
                 col_letter = self._col_letter(col_idx, tools)
                 entity = col_to_entity.get(col_idx, "")
 
-                # If not directly on an entity column, find closest entity col
                 if not entity:
                     entity = self._find_nearest_entity(col_idx, entity_hits)
 
@@ -386,12 +399,10 @@ class SheetCurrencyAgent:
         entity_currency_prior: Dict[str, str],
         tools: Any,
     ) -> List[SheetCurrencyHit]:
-        """
-        For entity columns where no in-sheet currency evidence was found,
-        use workbook-structure entity→currency priors (lower confidence).
-        """
         hits: List[SheetCurrencyHit] = []
         covered_entities: set[str] = {h.entity.upper() for h in existing_hits if h.entity}
+
+        _ = tools  # kept for signature consistency
 
         for eh in entity_hits:
             entity_upper = eh.entity.upper()
@@ -430,6 +441,8 @@ class SheetCurrencyAgent:
         workbook_structure: Optional[WorkbookStructure],
         prompt_profile: Optional[StagePromptProfile],
     ) -> List[SheetCurrencyHit]:
+        _ = formulas  # currently unused in prompt construction
+
         entity_currency_prior: Dict[str, str] = {}
         if workbook_structure is not None:
             for ent in (workbook_structure.entities or []):
@@ -448,7 +461,11 @@ class SheetCurrencyAgent:
                     "header_text": eh.header_text,
                 })
 
-        grid_text = _grid_to_text(grid, max_rows=self.max_preview_rows, max_cols=self.max_preview_cols)
+        grid_text = _grid_to_text(
+            grid,
+            max_rows=self.max_preview_rows,
+            max_cols=self.max_preview_cols,
+        )
 
         context_block = json.dumps({
             "sheet_name": task.sheet_name,
@@ -590,19 +607,15 @@ class SheetCurrencyAgent:
 
     @staticmethod
     def _extract_currency_from_text(text: str) -> Optional[str]:
-        """Return the first recognised currency code from *text*, or None."""
         text_stripped = text.strip()
 
-        # Check symbols first (single char, fast)
         for symbol, code in _CURRENCY_SYMBOLS.items():
             if symbol in text_stripped:
                 return code
 
-        # Check codes (case-insensitive word boundary)
         match = _CURRENCY_PATTERN.search(text_stripped.upper())
         if match:
             raw = match.group(0).upper()
-            # Normalise ILS → NIS
             if raw == "ILS":
                 return "NIS"
             if raw in _CURRENCY_CODES:
@@ -616,14 +629,9 @@ class SheetCurrencyAgent:
 
     @staticmethod
     def _find_nearest_entity(col_idx: int, entity_hits: List[SheetEntityHit]) -> str:
-        """
-        Return the entity whose column is closest (by distance) to col_idx.
-        Returns "" when no entity hits are available.
-        """
         if not entity_hits:
             return ""
         closest = min(entity_hits, key=lambda eh: abs(eh.col_idx - col_idx))
-        # Only assign if within 3 columns — beyond that it is too speculative
         if abs(closest.col_idx - col_idx) <= 3:
             return closest.entity
         return ""
@@ -639,6 +647,7 @@ class SheetCurrencyAgent:
                 return str(tools.excel_column_index_to_letter(col_idx) or "")
         except Exception:
             pass
+
         result = ""
         idx = col_idx
         while True:
@@ -649,13 +658,10 @@ class SheetCurrencyAgent:
         return result
 
 
-# ---------------------------------------------------------------------------
-# Module-level grid renderer (shared / standalone)
-# ---------------------------------------------------------------------------
-
 def _grid_to_text(grid: List[List[Any]], max_rows: int, max_cols: int) -> str:
     if not isinstance(grid, list) or not grid:
         return ""
+
     lines: List[str] = []
     for r_idx, row in enumerate(grid[:max_rows]):
         row = row if isinstance(row, list) else []
@@ -669,36 +675,32 @@ def _grid_to_text(grid: List[List[Any]], max_rows: int, max_cols: int) -> str:
     return "\n".join(lines)
 
 
-# ---------------------------------------------------------------------------
-# JSON parsing helper
-# ---------------------------------------------------------------------------
-
 def _parse_json_loose(text: str) -> Optional[Dict[str, Any]]:
     if not text:
         return None
+
     fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.DOTALL | re.IGNORECASE)
     if fenced:
         try:
             return json.loads(fenced.group(1).strip())
         except Exception:
             return None
+
     if text.startswith("{") and text.endswith("}"):
         try:
             return json.loads(text)
         except Exception:
             pass
+
     candidate = re.search(r"(\{.*\})", text, flags=re.DOTALL)
     if candidate:
         try:
             return json.loads(candidate.group(1).strip())
         except Exception:
             return None
+
     return None
 
-
-# ---------------------------------------------------------------------------
-# Default prompts
-# ---------------------------------------------------------------------------
 
 _DEFAULT_SYSTEM_PROMPT = """
 You are a financial Excel sheet currency detection agent.

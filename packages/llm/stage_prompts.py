@@ -328,7 +328,10 @@ do NOT collapse them into one hit.
 # Dynamic stage profiles (sheet_analysis, final_render)
 # ---------------------------------------------------------------------------
 
-def _build_sheet_analysis_profile(search_config: Optional[object] = None) -> StagePromptProfile:
+def _build_sheet_analysis_profile(
+    search_config: Optional[object] = None,
+    known_entities: Optional[List[Dict[str, str]]] = None,   # FIX PROMPT-1: new param
+) -> StagePromptProfile:
     search_block = ""
     if search_config is not None:
         fmt = getattr(search_config, "output_format", "json")
@@ -341,6 +344,27 @@ Search configuration:
   (prioritize these roles; all others map to 'other' or are omitted)
 """.strip()
 
+    # FIX PROMPT-1: inject known_entities block when available
+    entity_block = ""
+    if known_entities:
+        lines = [
+            "Known entities identified by workbook structure analysis — YOU MUST search for these:",
+        ]
+        for ent in known_entities:
+            name     = ent.get("name", "")
+            currency = ent.get("currency") or "unknown"
+            lines.append(f"  - entity={name!r}  currency={currency!r}")
+        lines += [
+            "",
+            "For each known entity:",
+            "  1. Find the column whose header contains or matches the entity name.",
+            "  2. Assign role='entity_value', entity=<name>, currency=<entity_currency>.",
+            "  3. A header like 'LTD', 'INC', 'Company A' is a strong entity_value signal.",
+            "  4. Include the column even if its confidence is lower than other columns.",
+            "  5. If not found, add 'missing_entity_column' to quality_flags.",
+        ]
+        entity_block = "\n".join(lines)
+
     base_task = """
 Stage: sheet_analysis
 
@@ -349,6 +373,18 @@ Goal:
 2. Identify column mappings for the required structural roles.
 3. Infer likely unit and data-row ranges when supported by evidence.
 4. Flag weak or suspicious structure.
+
+Column roles:
+  coa_name      — account name / description column (TB reference)
+  entity_value  — one column per legal entity containing that entity's values
+  debit         — AJE debit column
+  credit        — AJE credit column
+  aje           — combined AJE column (not split debit/credit)
+  consolidated  — consolidated totals column
+  consolidated_aje — consolidated AJE column
+  budget        — budget column
+  prior_period  — prior reporting period column
+  other         — any other column
 
 Deep-analysis requirements:
 - Inspect header patterns, merged cells, anchor terms, currency markers, and repeated structures.
@@ -359,13 +395,16 @@ Deep-analysis requirements:
 - Focus on the most recent period; older periods map to prior_period.
 """.strip()
 
-    task_prompt = f"{base_task}\n\n{search_block}".strip() if search_block else base_task
+    parts = [base_task]
+    if entity_block:
+        parts.append(entity_block)
+    if search_block:
+        parts.append(search_block)
 
-    return StagePromptProfile(
-        name="sheet_analysis",
-        system_prompt=GLOBAL_FINANCIAL_SYSTEM_PROMPT,
-        task_prompt=task_prompt,
-        output_contract="""
+    task_prompt = "\n\n".join(parts)
+
+    # FIX PROMPT-2: entity defaults to null (not "") so LLM returns null for non-entity cols
+    output_contract = """
 {
   "classification": {
     "types": ["BS", "PL"],
@@ -376,9 +415,9 @@ Deep-analysis requirements:
     {
       "col_idx": null,
       "role": "other",
-      "entity": "",
-      "currency": "",
-      "period": "",
+      "entity": null,
+      "currency": null,
+      "period": null,
       "header_text": "",
       "formula_pattern": "",
       "row_start": null,
@@ -391,12 +430,19 @@ Deep-analysis requirements:
   "unit": null,
   "quality_flags": []
 }
-""".strip(),
+""".strip()
+
+    return StagePromptProfile(
+        name="sheet_analysis",
+        system_prompt=GLOBAL_FINANCIAL_SYSTEM_PROMPT,
+        task_prompt=task_prompt,
+        output_contract=output_contract,
         analysis_rules=[
             "A generic balance or total column is not an entity column unless the header clearly identifies an entity.",
             "Merged cells are useful clues but not sufficient proof by themselves.",
             "Numeric account code columns are usually 'other', not 'coa_name'.",
-            "If ambiguity remains, prefer null/blank fields with lower confidence.",
+            "If ambiguity remains, prefer null fields with lower confidence.",
+            "entity field: set to the entity name string when role=entity_value/aje/consolidated; null otherwise.",
         ],
         depth="deep",
     )
@@ -438,9 +484,9 @@ Deep-analysis requirements:
     {
       "col_idx": null,
       "role": "other",
-      "entity": "",
-      "currency": "",
-      "period": "",
+      "entity": null,
+      "currency": null,
+      "period": null,
       "header_text": "",
       "formula_pattern": "",
       "row_start": null,
@@ -648,14 +694,20 @@ class PromptRegistry:
       "sheet_company"  → SHEET_COMPANY_PROFILE
       "sheet_currency" → SHEET_CURRENCY_PROFILE
 
+    v0.6.0 additions (PROMPT-1 fix):
+      known_entities parameter on _build_sheet_analysis_profile()
+      enrich_sheet_analysis(known_entities) method for runtime injection
+
     Usage (basic — no search config):
         registry = PromptRegistry()
         profile = registry.get("sheet_company")   # → StagePromptProfile
 
-    Usage (with search config):
-        from Multi_agen.packages.core.search_config import ColumnSearchConfig
-        cfg = ColumnSearchConfig(output_format="json", key_roles=["coa_name", "entity_value", ...])
-        registry = PromptRegistry(search_config=cfg)
+    Usage (with known entities injected at runtime — ORC calls this):
+        enriched = registry.enrich_sheet_analysis(known_entities=[
+            {"name": "LTD", "currency": "NIS"},
+            {"name": "INC", "currency": "USD"},
+        ])
+        # pass enriched to sheet_analyzer.analyze(prompt_profile=enriched)
     """
 
     def __init__(
@@ -705,6 +757,20 @@ class PromptRegistry:
     def user_prompt(self, name: str, context_block: str = "") -> Optional[str]:
         p = self.get(name)
         return p.compose_user_prompt(context_block) if p is not None else None
+
+    # FIX PROMPT-1: runtime entity injection
+    def enrich_sheet_analysis(
+        self,
+        known_entities: Optional[List[Dict[str, str]]] = None,
+    ) -> StagePromptProfile:
+        """
+        Return a sheet_analysis profile enriched with known entity hints.
+        Called by ORC before passing the profile to sheet_analyzer.analyze().
+        """
+        return _build_sheet_analysis_profile(
+            search_config=self._search_config,
+            known_entities=known_entities or [],
+        )
 
     # ------------------------------------------------------------------
     # Internal builders

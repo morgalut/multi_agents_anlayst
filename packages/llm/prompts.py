@@ -89,6 +89,8 @@ def build_sheet_analysis_messages(
     *,
     formulas: Optional[List[List[Any]]] = None,
     header_hint_rows: Optional[Tuple[int, int]] = None,
+    # FIX PROMPT-3: new parameter — workbook_structure entities passed from ORC
+    known_entities: Optional[List[Dict[str, Any]]] = None,
     max_rows: int = 60,
     max_cols: int = 20,
     max_formula_rows: int = 30,
@@ -97,6 +99,11 @@ def build_sheet_analysis_messages(
 ) -> Tuple[str, str]:
     """
     Build system/user prompts for sheet analysis using a stage prompt profile.
+
+    FIX PROMPT-3:
+    - Accepts known_entities (list of {name, currency} dicts from workbook_structure)
+    - Injects them into context_block so the LLM can see entity-column hints
+    - Also builds an enriched prompt_profile if the registry supports it
 
     Added support:
     - formula preview
@@ -118,9 +125,24 @@ def build_sheet_analysis_messages(
         start_row, end_row = header_hint_rows
         header_hint_text = f"\nSuggested header-area rows: {start_row}-{end_row}"
 
+    # FIX PROMPT-3: build entity hint block when known_entities are provided
+    entity_hint_text = ""
+    if known_entities:
+        lines = ["Known entities from workbook structure (MUST search for these as entity_value columns):"]
+        for ent in known_entities:
+            name = str(getattr(ent, "name", None) or ent.get("name", "")).strip()
+            currency = str(getattr(ent, "currency", None) or ent.get("currency", "") or "").strip()
+            if name:
+                lines.append(f"  - entity={name!r}  currency={(currency or 'unknown')!r}")
+        lines += [
+            "Action: for each entity above, find the column whose header contains that name.",
+            "Assign role='entity_value', entity=<name>, currency=<currency> to that column.",
+        ]
+        entity_hint_text = "\n" + "\n".join(lines) + "\n"
+
     context_block = f"""
 Sheet name: {sheet_name}
-
+{entity_hint_text}
 Top grid (preview):
 {grid_text}
 {header_hint_text}

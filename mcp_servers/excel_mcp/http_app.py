@@ -16,10 +16,14 @@ from .server import ExcelMCPServer
 class WorkbookProvider:
     """
     Real workbook provider backed by openpyxl.
-    Responsible for opening and saving Excel workbooks.
+
+    Access modes:
+    - open_for_read:     fast streaming reads for cell/range/formula scans
+    - open_for_metadata: normal workbook open for sheet metadata like merged cells
+    - open_for_write:    writable workbook open
     """
 
-    def open(self, workbook_path: str):
+    def _validate_path(self, workbook_path: str) -> Path:
         path = Path(workbook_path)
 
         if not workbook_path:
@@ -31,21 +35,70 @@ class WorkbookProvider:
         if not path.is_file():
             raise FileNotFoundError(f"Workbook path is not a file: {workbook_path}")
 
+        return path
+
+    def open_for_read(self, workbook_path: str, *, data_only: bool = False):
+        """
+        Fast read path for large scans.
+        Uses read_only=True for better performance.
+        """
+        path = self._validate_path(workbook_path)
         try:
-            return load_workbook(filename=str(path), data_only=False)
+            return load_workbook(
+                filename=str(path),
+                read_only=True,
+                data_only=data_only,
+                keep_links=False,
+            )
         except Exception as exc:
-            raise RuntimeError(f"Failed to open workbook: {workbook_path}") from exc
+            raise RuntimeError(f"Failed to open workbook for read: {workbook_path}") from exc
+
+    def open_for_metadata(self, workbook_path: str):
+        """
+        Metadata path for worksheet features unavailable in read-only mode,
+        such as merged_cells.
+        """
+        path = self._validate_path(workbook_path)
+        try:
+            return load_workbook(
+                filename=str(path),
+                read_only=False,
+                data_only=False,
+                keep_links=False,
+            )
+        except Exception as exc:
+            raise RuntimeError(f"Failed to open workbook for metadata: {workbook_path}") from exc
+
+    def open_for_write(self, workbook_path: str):
+        """
+        Writable workbook open.
+        """
+        path = self._validate_path(workbook_path)
+        try:
+            return load_workbook(
+                filename=str(path),
+                read_only=False,
+                data_only=False,
+                keep_links=False,
+            )
+        except Exception as exc:
+            raise RuntimeError(f"Failed to open workbook for write: {workbook_path}") from exc
 
     def save(self, workbook, workbook_path: str) -> None:
-        path = Path(workbook_path)
-
-        if not workbook_path:
-            raise ValueError("Missing required context: workbook_path")
+        path = self._validate_path(workbook_path)
 
         try:
             workbook.save(str(path))
         except Exception as exc:
             raise RuntimeError(f"Failed to save workbook: {workbook_path}") from exc
+
+    def close_quietly(self, workbook) -> None:
+        try:
+            close = getattr(workbook, "close", None)
+            if callable(close):
+                close()
+        except Exception:
+            pass
 
 
 # -----------------------------
@@ -56,7 +109,7 @@ excel_server = ExcelMCPServer(workbook_provider=workbook_provider)
 
 app = FastAPI(
     title="excel-mcp",
-    version="0.3.1",
+    version="0.3.2",
 )
 
 

@@ -88,6 +88,7 @@ class MainSheetSchemaDetector:
 
     def __init__(self, config: Optional[SchemaDetectorConfig] = None) -> None:
         self.config = config or SchemaDetectorConfig()
+        self._disable_formula_probes = False
 
     def detect(
         self,
@@ -681,6 +682,9 @@ class MainSheetSchemaDetector:
         nrows: int,
         ncols: int,
     ) -> List[List[Optional[str]]]:
+        if self._disable_formula_probes:
+            return []
+
         try:
             return tools.excel_get_formulas(
                 sheet_name=sheet_name,
@@ -689,8 +693,20 @@ class MainSheetSchemaDetector:
                 nrows=nrows,
                 ncols=ncols,
             )
-        except Exception:
+        except Exception as exc:
             logger.exception("SchemaDetector:formula_read_failed sheet=%s", sheet_name)
+
+            msg = str(exc).lower()
+            cause = getattr(exc, "cause", None)
+            cause_msg = str(cause).lower() if cause else ""
+
+            if "timeout" in msg or "timed out" in msg or "timeout" in cause_msg or "timed out" in cause_msg:
+                self._disable_formula_probes = True
+                logger.warning(
+                    "SchemaDetector:disabling further formula probes after timeout sheet=%s",
+                    sheet_name,
+                )
+
             return []
 
     # ------------------------------------------------------------------

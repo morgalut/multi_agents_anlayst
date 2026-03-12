@@ -12,31 +12,34 @@ from .tools.find_text import tool_find_text
 
 
 class ExcelMCPServer:
-    """
-    Minimal MCP server skeleton.
-
-    Integrate with actual MCP runtime by:
-      - listing tools via list_tools()
-      - calling dispatch(tool_name, args, ctx)
-    """
-
     def __init__(self, workbook_provider):
-        """
-        workbook_provider: object that can open workbook path / provide workbook handle.
-        Keep server stateless; ctx should carry workbook_path, etc.
-        """
         self.workbook_provider = workbook_provider
-        self._tools: Dict[str, ToolSpec] = {t.name: t for t in self._build_tools()}
+
+        built_tools = self._build_tools()
+        self._tools: Dict[str, ToolSpec] = {t.name: t for t in built_tools}
 
     def _build_tools(self) -> List[ToolSpec]:
-        return [
-            tool_list_sheets(self.workbook_provider),
-            tool_read_sheet_range(self.workbook_provider),
-            tool_write_cells(self.workbook_provider),
-            tool_detect_merged_cells(self.workbook_provider),
-            tool_get_formulas(self.workbook_provider),
-            tool_find_text(self.workbook_provider),
+        factories = [
+            ("excel.list_sheets", tool_list_sheets),
+            ("excel.read_sheet_range", tool_read_sheet_range),
+            ("excel.write_cells", tool_write_cells),
+            ("excel.detect_merged_cells", tool_detect_merged_cells),
+            ("excel.get_formulas", tool_get_formulas),
+            ("excel.find_text", tool_find_text),
         ]
+
+        built: List[ToolSpec] = []
+        for name, factory in factories:
+            tool = factory(self.workbook_provider)
+            if tool is None:
+                raise RuntimeError(f"Tool factory returned None: {name}")
+            if not isinstance(tool, ToolSpec):
+                raise TypeError(
+                    f"Tool factory {name} returned {type(tool).__name__}, expected ToolSpec"
+                )
+            built.append(tool)
+
+        return built
 
     def list_tools(self) -> List[Dict[str, Any]]:
         return [
