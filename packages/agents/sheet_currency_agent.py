@@ -83,12 +83,14 @@ class SheetCurrencyAgent:
         max_preview_rows: int = 20,
         max_preview_cols: int = 40,
         max_merged: int = 60,
+        enable_formula_probe: bool = False,
     ) -> None:
         self.llm = llm
         self.llm_enabled = llm_enabled
         self.max_preview_rows: int = min(max_preview_rows, _HARD_MAX_PREVIEW_ROWS)
         self.max_preview_cols: int = min(max_preview_cols, _HARD_MAX_PREVIEW_COLS)
         self.max_merged: int = min(max_merged, _HARD_MAX_MERGED)
+        self.enable_formula_probe = bool(enable_formula_probe)
 
     def set_llm(self, llm: LLMClient) -> None:
         self.llm = llm
@@ -128,7 +130,7 @@ class SheetCurrencyAgent:
         # ------------------------------------------------------------------
         # Step 1: collect sheet evidence
         # ------------------------------------------------------------------
-        grid, merged, formulas = self._collect_evidence(task.sheet_name, tools)
+        grid, merged, formulas, evidence_flags = self._collect_evidence(task.sheet_name, tools)
 
         # ------------------------------------------------------------------
         # Step 2: heuristic pass
@@ -152,8 +154,10 @@ class SheetCurrencyAgent:
                 "SheetCurrencyAgent:done (no_llm) sheet=%s hits=%d elapsed_ms=%.1f",
                 task.sheet_name, len(heuristic_hits), elapsed,
             )
-            return self._build_extraction(heuristic_hits, extra_flags=["llm_disabled"])
-
+            return self._build_extraction(
+                heuristic_hits,
+                extra_flags=[*evidence_flags, f"llm_error:{type(exc).__name__}"],
+            )
         try:
             llm_hits = self._llm_currency_scan(
                 task=task,
@@ -181,7 +185,10 @@ class SheetCurrencyAgent:
             "SheetCurrencyAgent:done sheet=%s hits=%d elapsed_ms=%.1f",
             task.sheet_name, len(merged_hits), elapsed,
         )
-        return self._build_extraction(merged_hits)
+        return self._build_extraction(
+    merged_hits,
+    extra_flags=evidence_flags,
+)
 
     # ------------------------------------------------------------------
     # Evidence collection
@@ -189,10 +196,13 @@ class SheetCurrencyAgent:
 
     def _collect_evidence(
         self, sheet_name: str, tools: Any
-    ) -> tuple[List[List[Any]], List[Dict[str, Any]], List[List[Optional[str]]]]:
+    ) -> tuple[List[List[Any]], List[Dict[str, Any]], List[List[Optional[str]]], List[str]]:
         grid: List[List[Any]] = []
         merged: List[Dict[str, Any]] = []
         formulas: List[List[Optional[str]]] = []
+        flags: List[str] = []
+
+        grid_ok = False
 
         try:
             if hasattr(tools, "excel_read_sheet_range"):
@@ -203,40 +213,66 @@ class SheetCurrencyAgent:
                     nrows=self.max_preview_rows,
                     ncols=self.max_preview_cols,
                 )
-        except Exception:
+                grid_ok = True
+                flags.append("grid_read_ok")
+            else:
+                flags.append("grid_tool_missing")
+        except Exception as exc:
             logger.exception("SheetCurrencyAgent:grid_read_failed sheet=%s", sheet_name)
+            flags.append(f"grid_read_failed:{type(exc).__name__}")
 
-        try:
-            if hasattr(tools, "excel_detect_merged_cells"):
-                merged = (
-                    tools.excel_detect_merged_cells(sheet_name=sheet_name) or []
-                )[: self.max_merged]
-        except Exception:
-            logger.exception("SheetCurrencyAgent:merged_read_failed sheet=%s", sheet_name)
+        # Only attempt merged if grid succeeded
+        if grid_ok:
+            try:
+                if hasattr(tools, "excel_detect_merged_cells"):
+                    merged = (
+                        tools.excel_detect_merged_cells(sheet_name=sheet_name) or []
+                    )[: self.max_merged]
+                    flags.append("merged_read_ok")
+                else:
+                    flags.append("merged_tool_missing")
+            except Exception as exc:
+                logger.exception("SheetCurrencyAgent:merged_read_failed sheet=%s", sheet_name)
+                flags.append(f"merged_read_failed:{type(exc).__name__}")
+        else:
+            flags.append("merged_skipped_due_to_grid_failure")
 
-        try:
-            if hasattr(tools, "excel_get_formulas_safe"):
-                formulas = tools.excel_get_formulas_safe(
-                    sheet_name=sheet_name,
-                    row0=0,
-                    col0=0,
-                    nrows=min(self.max_preview_rows, 5),
-                    ncols=min(self.max_preview_cols, 10),
-                )
-            elif hasattr(tools, "excel_get_formulas"):
-                formulas = tools.excel_get_formulas(
-                    sheet_name=sheet_name,
-                    row0=0,
-                    col0=0,
-                    nrows=min(self.max_preview_rows, 5),
-                    ncols=min(self.max_preview_cols, 10),
-                )
-        except Exception:
-            logger.exception("SheetCurrencyAgent:formula_read_failed sheet=%s", sheet_name)
-            formulas = []
+        # Formula probe is optional because it is expensive.
+        # We still add explicit flags so downstream code can see whether it ran.
+        if self.enable_formula_probe:
+            try:
+                if hasattr(tools, "excel_get_formulas"):
+                    formulas = tools.excel_get_formulas(
+                        sheet_name=sheet_name,
+                        row0=0,
+                        col0=0,
+                        nrows=min(self.max_preview_rows, 5),
+                        ncols=min(self.max_preview_cols, 10),
+                    )
+                    flags.append("formulas_read_ok")
+                elif hasattr(tools, "excel_get_formulas_safe"):
+                    formulas = tools.excel_get_formulas_safe(
+                        sheet_name=sheet_name,
+                        row0=0,
+                        col0=0,
+                        nrows=min(self.max_preview_rows, 5),
+                        ncols=min(self.max_preview_cols, 10),
+                    )
+                    # safe version hides hard failures, so mark it separately
+                    if formulas:
+                        flags.append("formulas_read_ok_via_safe")
+                    else:
+                        flags.append("formulas_safe_returned_empty")
+                else:
+                    flags.append("formulas_tool_missing")
+            except Exception as exc:
+                logger.exception("SheetCurrencyAgent:formula_read_failed sheet=%s", sheet_name)
+                flags.append(f"formula_read_failed:{type(exc).__name__}")
+                formulas = []
+        else:
+            flags.append("formulas_skipped_not_enabled")
 
-        return grid, merged, formulas
-
+        return grid, merged, formulas, flags
     # ------------------------------------------------------------------
     # Heuristic currency scan
     # ------------------------------------------------------------------

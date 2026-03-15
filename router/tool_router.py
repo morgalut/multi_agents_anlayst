@@ -16,6 +16,7 @@ class ToolRouterConfig:
     workbook_path: str = ""
     excel_server_id: str = "excel-mcp"
     max_error_body_chars: int = 4000
+    timeout_seconds: Optional[float] = None
 
 
 class ToolRouter:
@@ -43,6 +44,7 @@ class ToolRouter:
             config=ExcelClientConfig(
                 server_id=self._cfg.excel_server_id,
                 max_error_body_chars=self._cfg.max_error_body_chars,
+                timeout_seconds=self._cfg.timeout_seconds,
             ),
             workbook_path=workbook_path,
         )
@@ -130,7 +132,7 @@ class ToolRouter:
             logger.info("ToolRouter:excel_get_formulas ok rows=%d", len(result))
             return result
 
-        except Exception as exc:
+        except Exception as first_exc:
             logger.exception(
                 "ToolRouter:excel_get_formulas FAILED first_attempt sheet=%s",
                 sheet_name,
@@ -141,7 +143,7 @@ class ToolRouter:
             small_ncols = max(1, min(ncols, 8))
 
             if small_nrows == nrows and small_ncols == ncols:
-                raise
+                raise first_exc
 
             try:
                 logger.info(
@@ -160,12 +162,13 @@ class ToolRouter:
                     len(result),
                 )
                 return result
-            except Exception:
+
+            except Exception as retry_exc:
                 logger.exception(
                     "ToolRouter:excel_get_formulas FAILED retry_small sheet=%s",
                     sheet_name,
                 )
-                raise exc
+                raise retry_exc from first_exc
 
     def excel_get_formulas_safe(
         self,

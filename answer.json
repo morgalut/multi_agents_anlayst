@@ -5,78 +5,276 @@ More?   -d "{\"run_id\":\"run-1\",\"workbook_path\":\"C:\\\\Users\\\\morga\\\\De
     "workbook_structure": {
         "main_sheet_names": [
             "FS",
-            "BOD Slides"
+            "Reports",
+            "BOD Slides",
+            "Actual vs Budget",
+            "CF",
+            "Shareholders Equity"
         ],
-        "contains": [
-            "BS",
-            "PL"
-        ],
+        "contains": [],
         "entities": [
             {
                 "name": "LTD",
                 "currency": "NIS",
-                "confidence": 0.9,
+                "confidence": 0.96,
                 "evidence": [
-                    "FS!B4 references WP_LTD",
-                    "Header 'In NIS'",
-                    "Column labeled 'LTD'"
+                    "FS headers include 'LTD'",
+                    "sheet names GL_LTD, AJE_LTD, WP_LTD, Accounts_LTD",
+                    "WP_LTD is a balance-sheet working paper in NIS"
                 ]
             },
             {
                 "name": "INC",
-                "currency": "USD",
-                "confidence": 0.9,
+                "currency": "NIS",
+                "confidence": 0.86,
                 "evidence": [
-                    "FS sheet columns labeled 'INC' and '$'",
-                    "Formulas reference GL_INC"
+                    "FS headers include 'INC'",
+                    "sheet names GL_INC, AJE_INC, Accounts_INC, TB INC",
+                    "FS consolidates LTD and INC into NIS presentation"
+                ]
+            },
+            {
+                "name": "Consolidated",
+                "currency": "NIS",
+                "confidence": 0.94,
+                "evidence": [
+                    "FS headers include 'Consolidated'",
+                    "title 'Financial Statements'",
+                    "formulas SUMIF from GL_LTD and GL_INC with AJE columns"
+                ]
+            },
+            {
+                "name": "US management view",
+                "currency": "USD",
+                "confidence": 0.78,
+                "evidence": [
+                    "BOD Slides labeled 'US K$'",
+                    "Actual vs Budget uses $ with monthly/quarter/YTD operating metrics",
+                    "Reports sheet presents statements in USD in thousands"
                 ]
             }
         ],
         "has_consolidated": true,
-        "consolidated_formula_pattern": "=SUM(E11+I11)",
+        "consolidated_formula_pattern": "FS combines LTD and INC with separate AJE columns into a Consolidated column; evidence of SUMIF/VLOOKUP pulls from GL_LTD and GL_INC and checks from working papers/AJE sheets.",
         "has_aje": true,
         "aje_types": [
-            "LTD",
-            "INC"
+            "entity-level AJE for LTD",
+            "entity-level AJE for INC",
+            "AJE columns embedded in FS and working papers",
+            "cash-flow related AJE references"
         ],
-        "likely_units": "NIS and USD (thousands in BOD Slides)",
-        "likely_current_period": "2022-12-31",
+        "likely_units": "Mixed: NIS/ILS base statutory workbook, plus USD and USD thousands/K$ management and report views",
+        "likely_current_period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
         "sheet_candidates": [
             {
                 "name": "FS",
-                "kind": "financial_statements",
-                "confidence": 1.0,
+                "kind": "financial_statements_calc",
+                "confidence": 0.97,
                 "evidence": [
-                    "Header 'Financial Statements'",
-                    "Sections labeled 'ASSETS', 'LIABILITIES', 'P&L'",
-                    "Formulas referencing GL_LTD, GL_INC, AJE_LTD, AJE_INC",
-                    "Column headers include 'LTD', 'INC', 'AJE', 'Consolidated'"
+                    "title 'Financial Statements'",
+                    "BS sections present",
+                    "headers include LTD, INC, AJE, Consolidated",
+                    "date 2022-12-31",
+                    "pulls from GL_LTD and GL_INC"
+                ]
+            },
+            {
+                "name": "Reports",
+                "kind": "financial_statements_presentation",
+                "confidence": 0.96,
+                "evidence": [
+                    "titles 'Balance Sheets' and 'Statements of operations'",
+                    "USD in thousands",
+                    "values linked from WP_LTD and FS"
                 ]
             },
             {
                 "name": "BOD Slides",
-                "kind": "presentation_summary",
+                "kind": "management_presentation",
+                "confidence": 0.96,
+                "evidence": [
+                    "P&L Summary, HC Summary, Cash Flow Summary",
+                    "quarterly headers and 2023 YTD",
+                    "US K$ presentation"
+                ]
+            },
+            {
+                "name": "Actual vs Budget",
+                "kind": "management_reporting_calc",
+                "confidence": 0.94,
+                "evidence": [
+                    "Actual/Budget/Variance structure",
+                    "P&L, cash flow, HC and opex sections",
+                    "2023-05 monthly with quarter and YTD"
+                ]
+            },
+            {
+                "name": "AJE_LTD",
+                "kind": "aje_calc",
+                "confidence": 0.97,
+                "evidence": [
+                    "title 'Additional Jurnal Entries'",
+                    "journal-style columns",
+                    "references WP_LTD, FS, GL_LTD, AJE_INC"
+                ]
+            },
+            {
+                "name": "AJE_INC",
+                "kind": "aje_calc",
+                "confidence": 0.83,
+                "evidence": [
+                    "sheet name indicates entity-level AJE for INC",
+                    "paired with AJE_LTD and FS headers include AJE"
+                ]
+            },
+            {
+                "name": "WP_LTD",
+                "kind": "working_paper",
+                "confidence": 0.95,
+                "evidence": [
+                    "balance-sheet account sections",
+                    "VLOOKUP to GL_LTD/Accounts_LTD",
+                    "checks to FS and AJE column"
+                ]
+            },
+            {
+                "name": "CF",
+                "kind": "cash_flow_calc",
+                "confidence": 0.94,
+                "evidence": [
+                    "title 'Cash Flow $'",
+                    "statement of cash flows section",
+                    "mapping table and refs to FS, AJE_LTD, GL_LTD"
+                ]
+            },
+            {
+                "name": "Shareholders Equity",
+                "kind": "equity_rollforward",
+                "confidence": 0.9,
+                "evidence": [
+                    "balance of 31/12/2021 and 31/12/2022",
+                    "equity columns and total shareholders' equity",
+                    "links to FS and AJE_LTD"
+                ]
+            },
+            {
+                "name": "GL_LTD",
+                "kind": "general_ledger",
+                "confidence": 0.91,
+                "evidence": [
+                    "referenced by FS, WP_LTD, CF, AJE_LTD",
+                    "sheet name GL_LTD"
+                ]
+            },
+            {
+                "name": "GL_INC",
+                "kind": "general_ledger",
+                "confidence": 0.88,
+                "evidence": [
+                    "referenced by FS",
+                    "sheet name GL_INC"
+                ]
+            },
+            {
+                "name": "TB INC",
+                "kind": "trial_balance",
                 "confidence": 0.8,
                 "evidence": [
-                    "Header 'P&L Summary'",
-                    "References to FS!M79, FS!M87, FS!M110 etc.",
-                    "Contains summarized P&L and cash flow sections"
+                    "sheet name TB INC"
+                ]
+            },
+            {
+                "name": "Accounts_LTD",
+                "kind": "account_mapping",
+                "confidence": 0.87,
+                "evidence": [
+                    "referenced by WP_LTD",
+                    "sheet name suggests account master/mapping"
+                ]
+            },
+            {
+                "name": "Accounts_INC",
+                "kind": "account_mapping",
+                "confidence": 0.82,
+                "evidence": [
+                    "sheet name suggests account master/mapping for INC"
+                ]
+            },
+            {
+                "name": "intercompany match",
+                "kind": "intercompany_reconciliation",
+                "confidence": 0.86,
+                "evidence": [
+                    "sheet name 'intercompany match'"
+                ]
+            },
+            {
+                "name": "Captable-2018",
+                "kind": "cap_table",
+                "confidence": 0.89,
+                "evidence": [
+                    "sheet name 'Captable-2018'"
+                ]
+            },
+            {
+                "name": "Captable-2019",
+                "kind": "cap_table",
+                "confidence": 0.89,
+                "evidence": [
+                    "sheet name 'Captable-2019'"
+                ]
+            },
+            {
+                "name": "הרכב קרן הפרשי תרגום",
+                "kind": "fx_translation_analysis",
+                "confidence": 0.77,
+                "evidence": [
+                    "Hebrew sheet name indicates translation differences reserve composition"
+                ]
+            },
+            {
+                "name": "שע\"ח +סבירות",
+                "kind": "fx_rate_analysis",
+                "confidence": 0.72,
+                "evidence": [
+                    "Hebrew sheet name suggests exchange rate and reasonableness analysis"
+                ]
+            },
+            {
+                "name": "שע\"ח",
+                "kind": "fx_rate_analysis",
+                "confidence": 0.72,
+                "evidence": [
+                    "Hebrew sheet name suggests exchange rates"
+                ]
+            },
+            {
+                "name": "Severence pay",
+                "kind": "support_schedule",
+                "confidence": 0.74,
+                "evidence": [
+                    "sheet name suggests employee benefit/supporting schedule"
                 ]
             }
         ],
         "quality_flags": [
-            "multi-entity workbook",
-            "clear consolidation logic",
-            "AJE sheets referenced",
-            "currency duality (NIS/USD)"
+            "mixed currencies across workbook (NIS/ILS/USD)",
+            "mixed purposes: statutory consolidation and management reporting",
+            "period mismatch between statutory 2022 and management 2023 views",
+            "some sheets contain #REF! errors per analysis",
+            "only subset of sheets analyzed directly; some classifications inferred from names"
         ],
-        "confidence": 0.95,
-        "raw_llm_text": "{\n  \"main_sheet_names\": [\"FS\", \"BOD Slides\"],\n  \"contains\": [\"BS\", \"PL\"],\n  \"entities\": [\n    {\n      \"name\": \"LTD\",\n      \"currency\": \"NIS\",\n      \"confidence\": 0.9,\n      \"evidence\": [\"FS!B4 references WP_LTD\", \"Header 'In NIS'\", \"Column labeled 'LTD'\"]\n    },\n    {\n      \"name\": \"INC\",\n      \"currency\": \"USD\",\n      \"confidence\": 0.9,\n      \"evidence\": [\"FS sheet columns labeled 'INC' and '$'\", \"Formulas reference GL_INC\"]\n    }\n  ],\n  \"has_consolidated\": true,\n  \"consolidated_formula_pattern\": \"=SUM(E11+I11)\",\n  \"has_aje\": true,\n  \"aje_types\": [\"LTD\", \"INC\"],\n  \"likely_units\": \"NIS and USD (thousands in BOD Slides)\",\n  \"likely_current_period\": \"2022-12-31\",\n  \"sheet_candidates\": [\n    {\n      \"name\": \"FS\",\n      \"kind\": \"financial_statements\",\n      \"confidence\": 1.0,\n      \"evidence\": [\n        \"Header 'Financial Statements'\",\n        \"Sections labeled 'ASSETS', 'LIABILITIES', 'P&L'\",\n        \"Formulas referencing GL_LTD, GL_INC, AJE_LTD, AJE_INC\",\n        \"Column headers include 'LTD', 'INC', 'AJE', 'Consolidated'\"\n      ]\n    },\n    {\n      \"name\": \"BOD Slides\",\n      \"kind\": \"presentation_summary\",\n      \"confidence\": 0.8,\n      \"evidence\": [\n        \"Header 'P&L Summary'\",\n        \"References to FS!M79, FS!M87, FS!M110 etc.\",\n        \"Contains summarized P&L and cash flow sections\"\n      ]\n    }\n  ],\n  \"quality_flags\": [\"multi-entity workbook\", \"clear consolidation logic\", \"AJE sheets referenced\", \"currency duality (NIS/USD)\"],\n  \"confidence\": 0.95\n}"
+        "confidence": 0.91,
+        "raw_llm_text": "{\n  \"main_sheet_names\": [\"FS\", \"Reports\", \"BOD Slides\", \"Actual vs Budget\", \"CF\", \"Shareholders Equity\"],\n  \"contains\": [\n    \"financial_statements\",\n    \"balance_sheet\",\n    \"income_statement\",\n    \"cash_flow\",\n    \"shareholders_equity\",\n    \"general_ledger\",\n    \"trial_balance\",\n    \"account_mapping\",\n    \"adjusting_journal_entries\",\n    \"working_papers\",\n    \"management_reporting\",\n    \"budget_vs_actual\",\n    \"intercompany\",\n    \"cap_table\",\n    \"fx_translation\"\n  ],\n  \"entities\": [\n    {\n      \"name\": \"LTD\",\n      \"currency\": \"NIS\",\n      \"confidence\": 0.96,\n      \"evidence\": [\n        \"FS headers include 'LTD'\",\n        \"sheet names GL_LTD, AJE_LTD, WP_LTD, Accounts_LTD\",\n        \"WP_LTD is a balance-sheet working paper in NIS\"\n      ]\n    },\n    {\n      \"name\": \"INC\",\n      \"currency\": \"NIS\",\n      \"confidence\": 0.86,\n      \"evidence\": [\n        \"FS headers include 'INC'\",\n        \"sheet names GL_INC, AJE_INC, Accounts_INC, TB INC\",\n        \"FS consolidates LTD and INC into NIS presentation\"\n      ]\n    },\n    {\n      \"name\": \"Consolidated\",\n      \"currency\": \"NIS\",\n      \"confidence\": 0.94,\n      \"evidence\": [\n        \"FS headers include 'Consolidated'\",\n        \"title 'Financial Statements'\",\n        \"formulas SUMIF from GL_LTD and GL_INC with AJE columns\"\n      ]\n    },\n    {\n      \"name\": \"US management view\",\n      \"currency\": \"USD\",\n      \"confidence\": 0.78,\n      \"evidence\": [\n        \"BOD Slides labeled 'US K$'\",\n        \"Actual vs Budget uses $ with monthly/quarter/YTD operating metrics\",\n        \"Reports sheet presents statements in USD in thousands\"\n      ]\n    }\n  ],\n  \"has_consolidated\": true,\n  \"consolidated_formula_pattern\": \"FS combines LTD and INC with separate AJE columns into a Consolidated column; evidence of SUMIF/VLOOKUP pulls from GL_LTD and GL_INC and checks from working papers/AJE sheets.\",\n  \"has_aje\": true,\n  \"aje_types\": [\n    \"entity-level AJE for LTD\",\n    \"entity-level AJE for INC\",\n    \"AJE columns embedded in FS and working papers\",\n    \"cash-flow related AJE references\"\n  ],\n  \"likely_units\": \"Mixed: NIS/ILS base statutory workbook, plus USD and USD thousands/K$ management and report views\",\n  \"likely_current_period\": \"Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting\",\n  \"sheet_candidates\": [\n    {\n      \"name\": \"FS\",\n      \"kind\": \"financial_statements_calc\",\n      \"confidence\": 0.97,\n      \"evidence\": [\n        \"title 'Financial Statements'\",\n        \"BS sections present\",\n        \"headers include LTD, INC, AJE, Consolidated\",\n        \"date 2022-12-31\",\n        \"pulls from GL_LTD and GL_INC\"\n      ]\n    },\n    {\n      \"name\": \"Reports\",\n      \"kind\": \"financial_statements_presentation\",\n      \"confidence\": 0.96,\n      \"evidence\": [\n        \"titles 'Balance Sheets' and 'Statements of operations'\",\n        \"USD in thousands\",\n        \"values linked from WP_LTD and FS\"\n      ]\n    },\n    {\n      \"name\": \"BOD Slides\",\n      \"kind\": \"management_presentation\",\n      \"confidence\": 0.96,\n      \"evidence\": [\n        \"P&L Summary, HC Summary, Cash Flow Summary\",\n        \"quarterly headers and 2023 YTD\",\n        \"US K$ presentation\"\n      ]\n    },\n    {\n      \"name\": \"Actual vs Budget\",\n      \"kind\": \"management_reporting_calc\",\n      \"confidence\": 0.94,\n      \"evidence\": [\n        \"Actual/Budget/Variance structure\",\n        \"P&L, cash flow, HC and opex sections\",\n        \"2023-05 monthly with quarter and YTD\"\n      ]\n    },\n    {\n      \"name\": \"AJE_LTD\",\n      \"kind\": \"aje_calc\",\n      \"confidence\": 0.97,\n      \"evidence\": [\n        \"title 'Additional Jurnal Entries'\",\n        \"journal-style columns\",\n        \"references WP_LTD, FS, GL_LTD, AJE_INC\"\n      ]\n    },\n    {\n      \"name\": \"AJE_INC\",\n      \"kind\": \"aje_calc\",\n      \"confidence\": 0.83,\n      \"evidence\": [\n        \"sheet name indicates entity-level AJE for INC\",\n        \"paired with AJE_LTD and FS headers include AJE\"\n      ]\n    },\n    {\n      \"name\": \"WP_LTD\",\n      \"kind\": \"working_paper\",\n      \"confidence\": 0.95,\n      \"evidence\": [\n        \"balance-sheet account sections\",\n        \"VLOOKUP to GL_LTD/Accounts_LTD\",\n        \"checks to FS and AJE column\"\n      ]\n    },\n    {\n      \"name\": \"CF\",\n      \"kind\": \"cash_flow_calc\",\n      \"confidence\": 0.94,\n      \"evidence\": [\n        \"title 'Cash Flow $'\",\n        \"statement of cash flows section\",\n        \"mapping table and refs to FS, AJE_LTD, GL_LTD\"\n      ]\n    },\n    {\n      \"name\": \"Shareholders Equity\",\n      \"kind\": \"equity_rollforward\",\n      \"confidence\": 0.9,\n      \"evidence\": [\n        \"balance of 31/12/2021 and 31/12/2022\",\n        \"equity columns and total shareholders' equity\",\n        \"links to FS and AJE_LTD\"\n      ]\n    },\n    {\n      \"name\": \"GL_LTD\",\n      \"kind\": \"general_ledger\",\n      \"confidence\": 0.91,\n      \"evidence\": [\n        \"referenced by FS, WP_LTD, CF, AJE_LTD\",\n        \"sheet name GL_LTD\"\n      ]\n    },\n    {\n      \"name\": \"GL_INC\",\n      \"kind\": \"general_ledger\",\n      \"confidence\": 0.88,\n      \"evidence\": [\n        \"referenced by FS\",\n        \"sheet name GL_INC\"\n      ]\n    },\n    {\n      \"name\": \"TB INC\",\n      \"kind\": \"trial_balance\",\n      \"confidence\": 0.8,\n      \"evidence\": [\n        \"sheet name TB INC\"\n      ]\n    },\n    {\n      \"name\": \"Accounts_LTD\",\n      \"kind\": \"account_mapping\",\n      \"confidence\": 0.87,\n      \"evidence\": [\n        \"referenced by WP_LTD\",\n        \"sheet name suggests account master/mapping\"\n      ]\n    },\n    {\n      \"name\": \"Accounts_INC\",\n      \"kind\": \"account_mapping\",\n      \"confidence\": 0.82,\n      \"evidence\": [\n        \"sheet name suggests account master/mapping for INC\"\n      ]\n    },\n    {\n      \"name\": \"intercompany match\",\n      \"kind\": \"intercompany_reconciliation\",\n      \"confidence\": 0.86,\n      \"evidence\": [\n        \"sheet name 'intercompany match'\"\n      ]\n    },\n    {\n      \"name\": \"Captable-2018\",\n      \"kind\": \"cap_table\",\n      \"confidence\": 0.89,\n      \"evidence\": [\n        \"sheet name 'Captable-2018'\"\n      ]\n  "
     },
     "workbook_structure_provenance": {
         "workbook_structure_main_sheet_names": [
             "FS",
-            "BOD Slides"
+            "Reports",
+            "BOD Slides",
+            "Actual vs Budget",
+            "CF",
+            "Shareholders Equity"
         ],
         "selected_sheet_tasks": [
             "FS"
@@ -115,25 +313,124 @@ More?   -d "{\"run_id\":\"run-1\",\"workbook_path\":\"C:\\\\Users\\\\morga\\\\De
             "sheet_name": "FS",
             "contains": "BS",
             "unit": "NIS",
-            "data_row_start": 10,
+            "data_row_start": 9,
             "data_row_end": 186,
             "columns": [
+                {
+                    "col_idx": 1,
+                    "col_letter": "B",
+                    "role": "other",
+                    "entity": "",
+                    "currency": "",
+                    "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                    "header_text": "",
+                    "formula_pattern": "",
+                    "row_start": 10,
+                    "row_end": 59,
+                    "sheet_name": "FS",
+                    "confidence": 0.97,
+                    "evidence": [
+                        "Column contains numeric line/account grouping codes such as 1.0, 1.5, 2.0, 31.0, 50.0.",
+                        "Developer rule says numeric account code columns are usually 'other', not 'coa_name'."
+                    ]
+                },
                 {
                     "col_idx": 2,
                     "col_letter": "C",
                     "role": "coa_name",
                     "entity": "",
                     "currency": "",
-                    "period": "2022-12-31",
-                    "header_text": "Account name / description",
-                    "formula_pattern": "",
+                    "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                    "header_text": "",
+                    "formula_pattern": "Text labels / account descriptions",
+                    "row_start": 9,
+                    "row_end": 59,
+                    "sheet_name": "FS",
+                    "confidence": 0.98,
+                    "evidence": [
+                        "Contains account and section descriptions such as 'Current assets', 'Cash and cash equivalents LTD', 'Short-term Deposits', 'Total Assets', 'Accounts payables', 'Share capital'.",
+                        "This is the presentation label column adjacent to numeric account codes."
+                    ]
+                },
+                {
+                    "col_idx": 3,
+                    "col_letter": "D",
+                    "role": "other",
+                    "entity": "",
+                    "currency": "NIS",
+                    "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                    "header_text": "LTD",
+                    "formula_pattern": "=SUMIF(GL_LTD!$J:$J,Arow,GL_LTD!$I:$I)",
+                    "row_start": 10,
+                    "row_end": 59,
+                    "sheet_name": "FS",
+                    "confidence": 0.52,
+                    "evidence": [
+                        "Header row 5 contains 'LTD' above this area.",
+                        "Formulas pull from GL_LTD, so this column is linked to LTD.",
+                        "However, row 6 under this area shows 'IL', and row formulas suggest this column may be a local-currency/supporting LTD column rather than the main presented amount.",
+                        "Competing interpretation: this is an LTD amount column; alternate interpretation: it is a non-target support column within the LTD block."
+                    ]
+                },
+                {
+                    "col_idx": 5,
+                    "col_letter": "F",
+                    "role": "entity_value",
+                    "entity": "LTD",
+                    "currency": "NIS",
+                    "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                    "header_text": "LTD / $",
+                    "formula_pattern": "=SUMIF(GL_LTD!$J:$J,Arow,GL_LTD!$G:$G)",
+                    "row_start": 10,
+                    "row_end": 59,
+                    "sheet_name": "FS",
+                    "confidence": 0.67,
+                    "evidence": [
+                        "Known entity search: header row 5 explicitly contains 'LTD'.",
+                        "This column contains the main repeated LTD numeric values used in consolidation formulas, e.g. consolidated column M uses E+I.",
+                        "Formula pattern consistently pulls from GL_LTD.",
+                        "Alternative interpretation considered: column 3 could also be the LTD entity column. Chosen column 5 because it is directly summed into Consolidated, indicating primary presentation value.",
+                        "Currency signal is mixed: row 4 says 'In NIS', but row 6 under the column shows '$'. Confidence reduced due to conflicting currency/header cues."
+                    ]
+                },
+                {
+                    "col_idx": 7,
+                    "col_letter": "H",
+                    "role": "other",
+                    "entity": "",
+                    "currency": "",
+                    "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                    "header_text": "",
+                    "formula_pattern": "=IFERROR(Crow/Erow,0)",
                     "row_start": 10,
                     "row_end": 59,
                     "sheet_name": "FS",
                     "confidence": 0.95,
                     "evidence": [
-                        "Textual account names: 'Cash and cash equivalents', 'Accounts Receivables', 'Fixed assets', 'Accounts payables'",
-                        "Hierarchical structure under ASSETS and LIABILITIES"
+                        "Formula pattern is a ratio between two LTD-related columns (C/E).",
+                        "No header label matching a required structural role.",
+                        "Looks like FX/conversion or analytical ratio support column."
+                    ]
+                },
+                {
+                    "col_idx": 9,
+                    "col_letter": "J",
+                    "role": "entity_value",
+                    "entity": "INC",
+                    "currency": "NIS",
+                    "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                    "header_text": "INC / $",
+                    "formula_pattern": "=SUMIF(GL_INC!G:G,Arow,GL_INC!F:F)",
+                    "row_start": 10,
+                    "row_end": 59,
+                    "sheet_name": "FS",
+                    "confidence": 0.84,
+                    "evidence": [
+                        "Known entity search: header row 5 explicitly contains 'INC'.",
+                        "Formulas consistently pull from GL_INC.",
+                        "Column is used directly in consolidation formulas together with LTD column, e.g. M = E + I.",
+                        "Alternative interpretation considered: USD management-view possibility because row 6 shows '$'. Rejected because explicit header says 'INC' and formulas source from GL_INC, so entity signal is stronger.",
+                        "Currency assignment follows workbook-known entity metadata per instruction, though header currency cues are mixed."
                     ]
                 },
                 {
@@ -142,7 +439,7 @@ More?   -d "{\"run_id\":\"run-1\",\"workbook_path\":\"C:\\\\Users\\\\morga\\\\De
                     "role": "aje",
                     "entity": "",
                     "currency": "",
-                    "period": "2022-12-31",
+                    "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
                     "header_text": "AJE",
                     "formula_pattern": "",
                     "row_start": 167,
@@ -154,46 +451,154 @@ More?   -d "{\"run_id\":\"run-1\",\"workbook_path\":\"C:\\\\Users\\\\morga\\\\De
                     ]
                 },
                 {
+                    "col_idx": 11,
+                    "col_letter": "L",
+                    "role": "aje",
+                    "entity": "",
+                    "currency": "",
+                    "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                    "header_text": "AJE",
+                    "formula_pattern": "",
+                    "row_start": 10,
+                    "row_end": 59,
+                    "sheet_name": "FS",
+                    "confidence": 0.9,
+                    "evidence": [
+                        "Header row 5 explicitly says 'AJE'.",
+                        "No separate 'Debit' or 'Credit' headers visible nearby.",
+                        "Therefore best classified as combined AJE column."
+                    ]
+                },
+                {
                     "col_idx": 12,
                     "col_letter": "M",
-                    "role": "consolidated",
+                    "role": "entity_value",
                     "entity": "Consolidated",
                     "currency": "USD",
-                    "period": "2022-12-31",
+                    "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
                     "header_text": "Consolidated | $",
                     "formula_pattern": "",
                     "row_start": 167,
                     "row_end": 186,
                     "sheet_name": "FS",
-                    "confidence": 0.73,
+                    "confidence": 0.74,
                     "evidence": [
-                        "heuristic_consolidated_header_or_formula"
+                        "heuristic_entity_match"
+                    ]
+                },
+                {
+                    "col_idx": 13,
+                    "col_letter": "N",
+                    "role": "consolidated",
+                    "entity": "Consolidated",
+                    "currency": "NIS",
+                    "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                    "header_text": "Consolidated / $",
+                    "formula_pattern": "=SUM(Erow+Irow)",
+                    "row_start": 10,
+                    "row_end": 59,
+                    "sheet_name": "FS",
+                    "confidence": 0.92,
+                    "evidence": [
+                        "Known entity search: header row 5 explicitly contains 'Consolidated'.",
+                        "Formula evidence shows this column sums the chosen LTD and INC presentation columns, e.g. M11 = E11 + I11.",
+                        "This is strong presentation/consolidation evidence.",
+                        "Currency cue conflict exists because row 4 says 'In NIS' while row 6 shows '$'; confidence reduced slightly."
                     ]
                 },
                 {
                     "col_idx": 15,
                     "col_letter": "P",
-                    "role": "budget",
+                    "role": "prior_period",
                     "entity": "",
                     "currency": "",
                     "period": "2022-12-31",
+                    "header_text": "2022-12-31T00:00:00",
+                    "formula_pattern": "Mostly hardcoded numeric prior balances / sums",
+                    "row_start": 10,
+                    "row_end": 59,
+                    "sheet_name": "FS",
+                    "confidence": 0.95,
+                    "evidence": [
+                        "Header is an explicit past date: 2022-12-31T00:00:00.",
+                        "Instruction says focus on most recent period; older periods map to prior_period.",
+                        "Values appear as prior-period comparative amounts."
+                    ]
+                },
+                {
+                    "col_idx": 16,
+                    "col_letter": "Q",
+                    "role": "budget",
+                    "entity": "",
+                    "currency": "",
+                    "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
                     "header_text": "Budget",
                     "formula_pattern": "",
-                    "row_start": 167,
-                    "row_end": 186,
+                    "row_start": 10,
+                    "row_end": 59,
                     "sheet_name": "FS",
-                    "confidence": 0.68,
+                    "confidence": 0.99,
                     "evidence": [
-                        "heuristic_budget_header"
+                        "Header row 5 explicitly says 'Budget'."
+                    ]
+                },
+                {
+                    "col_idx": 17,
+                    "col_letter": "R",
+                    "role": "other",
+                    "entity": "",
+                    "currency": "",
+                    "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                    "header_text": "ישראל",
+                    "formula_pattern": "Text comments/check notes",
+                    "row_start": 10,
+                    "row_end": 59,
+                    "sheet_name": "FS",
+                    "confidence": 0.88,
+                    "evidence": [
+                        "Cells contain textual audit/check comments such as 'תקין' and narrative notes.",
+                        "Not a numeric value column."
+                    ]
+                },
+                {
+                    "col_idx": 18,
+                    "col_letter": "S",
+                    "role": "other",
+                    "entity": "",
+                    "currency": "",
+                    "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                    "header_text": "אינק",
+                    "formula_pattern": "Text comments/check notes",
+                    "row_start": 10,
+                    "row_end": 59,
+                    "sheet_name": "FS",
+                    "confidence": 0.8,
+                    "evidence": [
+                        "Despite header resembling INC in Hebrew, visible cells contain note/comment text rather than numeric balances.",
+                        "Therefore not treated as entity_value."
+                    ]
+                },
+                {
+                    "col_idx": 19,
+                    "col_letter": "T",
+                    "role": "other",
+                    "entity": "",
+                    "currency": "",
+                    "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                    "header_text": "הערות",
+                    "formula_pattern": "Text comments",
+                    "row_start": 10,
+                    "row_end": 59,
+                    "sheet_name": "FS",
+                    "confidence": 0.98,
+                    "evidence": [
+                        "Header means notes/comments.",
+                        "Visible contents are narrative remarks."
                     ]
                 }
             ],
-            "quality_flags": [
-                "missing_entity_column",
-                "consolidated_without_entities",
-                "aje_without_entity_columns"
-            ],
-            "confidence": 0.839
+            "quality_flags": [],
+            "confidence": 0.9076
         }
     ],
     "workbook_result": {
@@ -202,25 +607,124 @@ More?   -d "{\"run_id\":\"run-1\",\"workbook_path\":\"C:\\\\Users\\\\morga\\\\De
                 "sheet_name": "FS",
                 "contains": "BS",
                 "unit": "NIS",
-                "data_row_start": 10,
+                "data_row_start": 9,
                 "data_row_end": 186,
                 "columns": [
+                    {
+                        "col_idx": 1,
+                        "col_letter": "B",
+                        "role": "other",
+                        "entity": "",
+                        "currency": "",
+                        "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                        "header_text": "",
+                        "formula_pattern": "",
+                        "row_start": 10,
+                        "row_end": 59,
+                        "sheet_name": "FS",
+                        "confidence": 0.97,
+                        "evidence": [
+                            "Column contains numeric line/account grouping codes such as 1.0, 1.5, 2.0, 31.0, 50.0.",
+                            "Developer rule says numeric account code columns are usually 'other', not 'coa_name'."
+                        ]
+                    },
                     {
                         "col_idx": 2,
                         "col_letter": "C",
                         "role": "coa_name",
                         "entity": "",
                         "currency": "",
-                        "period": "2022-12-31",
-                        "header_text": "Account name / description",
-                        "formula_pattern": "",
+                        "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                        "header_text": "",
+                        "formula_pattern": "Text labels / account descriptions",
+                        "row_start": 9,
+                        "row_end": 59,
+                        "sheet_name": "FS",
+                        "confidence": 0.98,
+                        "evidence": [
+                            "Contains account and section descriptions such as 'Current assets', 'Cash and cash equivalents LTD', 'Short-term Deposits', 'Total Assets', 'Accounts payables', 'Share capital'.",
+                            "This is the presentation label column adjacent to numeric account codes."
+                        ]
+                    },
+                    {
+                        "col_idx": 3,
+                        "col_letter": "D",
+                        "role": "other",
+                        "entity": "",
+                        "currency": "NIS",
+                        "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                        "header_text": "LTD",
+                        "formula_pattern": "=SUMIF(GL_LTD!$J:$J,Arow,GL_LTD!$I:$I)",
+                        "row_start": 10,
+                        "row_end": 59,
+                        "sheet_name": "FS",
+                        "confidence": 0.52,
+                        "evidence": [
+                            "Header row 5 contains 'LTD' above this area.",
+                            "Formulas pull from GL_LTD, so this column is linked to LTD.",
+                            "However, row 6 under this area shows 'IL', and row formulas suggest this column may be a local-currency/supporting LTD column rather than the main presented amount.",
+                            "Competing interpretation: this is an LTD amount column; alternate interpretation: it is a non-target support column within the LTD block."
+                        ]
+                    },
+                    {
+                        "col_idx": 5,
+                        "col_letter": "F",
+                        "role": "entity_value",
+                        "entity": "LTD",
+                        "currency": "NIS",
+                        "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                        "header_text": "LTD / $",
+                        "formula_pattern": "=SUMIF(GL_LTD!$J:$J,Arow,GL_LTD!$G:$G)",
+                        "row_start": 10,
+                        "row_end": 59,
+                        "sheet_name": "FS",
+                        "confidence": 0.67,
+                        "evidence": [
+                            "Known entity search: header row 5 explicitly contains 'LTD'.",
+                            "This column contains the main repeated LTD numeric values used in consolidation formulas, e.g. consolidated column M uses E+I.",
+                            "Formula pattern consistently pulls from GL_LTD.",
+                            "Alternative interpretation considered: column 3 could also be the LTD entity column. Chosen column 5 because it is directly summed into Consolidated, indicating primary presentation value.",
+                            "Currency signal is mixed: row 4 says 'In NIS', but row 6 under the column shows '$'. Confidence reduced due to conflicting currency/header cues."
+                        ]
+                    },
+                    {
+                        "col_idx": 7,
+                        "col_letter": "H",
+                        "role": "other",
+                        "entity": "",
+                        "currency": "",
+                        "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                        "header_text": "",
+                        "formula_pattern": "=IFERROR(Crow/Erow,0)",
                         "row_start": 10,
                         "row_end": 59,
                         "sheet_name": "FS",
                         "confidence": 0.95,
                         "evidence": [
-                            "Textual account names: 'Cash and cash equivalents', 'Accounts Receivables', 'Fixed assets', 'Accounts payables'",
-                            "Hierarchical structure under ASSETS and LIABILITIES"
+                            "Formula pattern is a ratio between two LTD-related columns (C/E).",
+                            "No header label matching a required structural role.",
+                            "Looks like FX/conversion or analytical ratio support column."
+                        ]
+                    },
+                    {
+                        "col_idx": 9,
+                        "col_letter": "J",
+                        "role": "entity_value",
+                        "entity": "INC",
+                        "currency": "NIS",
+                        "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                        "header_text": "INC / $",
+                        "formula_pattern": "=SUMIF(GL_INC!G:G,Arow,GL_INC!F:F)",
+                        "row_start": 10,
+                        "row_end": 59,
+                        "sheet_name": "FS",
+                        "confidence": 0.84,
+                        "evidence": [
+                            "Known entity search: header row 5 explicitly contains 'INC'.",
+                            "Formulas consistently pull from GL_INC.",
+                            "Column is used directly in consolidation formulas together with LTD column, e.g. M = E + I.",
+                            "Alternative interpretation considered: USD management-view possibility because row 6 shows '$'. Rejected because explicit header says 'INC' and formulas source from GL_INC, so entity signal is stronger.",
+                            "Currency assignment follows workbook-known entity metadata per instruction, though header currency cues are mixed."
                         ]
                     },
                     {
@@ -229,7 +733,7 @@ More?   -d "{\"run_id\":\"run-1\",\"workbook_path\":\"C:\\\\Users\\\\morga\\\\De
                         "role": "aje",
                         "entity": "",
                         "currency": "",
-                        "period": "2022-12-31",
+                        "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
                         "header_text": "AJE",
                         "formula_pattern": "",
                         "row_start": 167,
@@ -241,77 +745,185 @@ More?   -d "{\"run_id\":\"run-1\",\"workbook_path\":\"C:\\\\Users\\\\morga\\\\De
                         ]
                     },
                     {
+                        "col_idx": 11,
+                        "col_letter": "L",
+                        "role": "aje",
+                        "entity": "",
+                        "currency": "",
+                        "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                        "header_text": "AJE",
+                        "formula_pattern": "",
+                        "row_start": 10,
+                        "row_end": 59,
+                        "sheet_name": "FS",
+                        "confidence": 0.9,
+                        "evidence": [
+                            "Header row 5 explicitly says 'AJE'.",
+                            "No separate 'Debit' or 'Credit' headers visible nearby.",
+                            "Therefore best classified as combined AJE column."
+                        ]
+                    },
+                    {
                         "col_idx": 12,
                         "col_letter": "M",
-                        "role": "consolidated",
+                        "role": "entity_value",
                         "entity": "Consolidated",
                         "currency": "USD",
-                        "period": "2022-12-31",
+                        "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
                         "header_text": "Consolidated | $",
                         "formula_pattern": "",
                         "row_start": 167,
                         "row_end": 186,
                         "sheet_name": "FS",
-                        "confidence": 0.73,
+                        "confidence": 0.74,
                         "evidence": [
-                            "heuristic_consolidated_header_or_formula"
+                            "heuristic_entity_match"
+                        ]
+                    },
+                    {
+                        "col_idx": 13,
+                        "col_letter": "N",
+                        "role": "consolidated",
+                        "entity": "Consolidated",
+                        "currency": "NIS",
+                        "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                        "header_text": "Consolidated / $",
+                        "formula_pattern": "=SUM(Erow+Irow)",
+                        "row_start": 10,
+                        "row_end": 59,
+                        "sheet_name": "FS",
+                        "confidence": 0.92,
+                        "evidence": [
+                            "Known entity search: header row 5 explicitly contains 'Consolidated'.",
+                            "Formula evidence shows this column sums the chosen LTD and INC presentation columns, e.g. M11 = E11 + I11.",
+                            "This is strong presentation/consolidation evidence.",
+                            "Currency cue conflict exists because row 4 says 'In NIS' while row 6 shows '$'; confidence reduced slightly."
                         ]
                     },
                     {
                         "col_idx": 15,
                         "col_letter": "P",
-                        "role": "budget",
+                        "role": "prior_period",
                         "entity": "",
                         "currency": "",
                         "period": "2022-12-31",
+                        "header_text": "2022-12-31T00:00:00",
+                        "formula_pattern": "Mostly hardcoded numeric prior balances / sums",
+                        "row_start": 10,
+                        "row_end": 59,
+                        "sheet_name": "FS",
+                        "confidence": 0.95,
+                        "evidence": [
+                            "Header is an explicit past date: 2022-12-31T00:00:00.",
+                            "Instruction says focus on most recent period; older periods map to prior_period.",
+                            "Values appear as prior-period comparative amounts."
+                        ]
+                    },
+                    {
+                        "col_idx": 16,
+                        "col_letter": "Q",
+                        "role": "budget",
+                        "entity": "",
+                        "currency": "",
+                        "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
                         "header_text": "Budget",
                         "formula_pattern": "",
-                        "row_start": 167,
-                        "row_end": 186,
+                        "row_start": 10,
+                        "row_end": 59,
                         "sheet_name": "FS",
-                        "confidence": 0.68,
+                        "confidence": 0.99,
                         "evidence": [
-                            "heuristic_budget_header"
+                            "Header row 5 explicitly says 'Budget'."
+                        ]
+                    },
+                    {
+                        "col_idx": 17,
+                        "col_letter": "R",
+                        "role": "other",
+                        "entity": "",
+                        "currency": "",
+                        "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                        "header_text": "ישראל",
+                        "formula_pattern": "Text comments/check notes",
+                        "row_start": 10,
+                        "row_end": 59,
+                        "sheet_name": "FS",
+                        "confidence": 0.88,
+                        "evidence": [
+                            "Cells contain textual audit/check comments such as 'תקין' and narrative notes.",
+                            "Not a numeric value column."
+                        ]
+                    },
+                    {
+                        "col_idx": 18,
+                        "col_letter": "S",
+                        "role": "other",
+                        "entity": "",
+                        "currency": "",
+                        "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                        "header_text": "אינק",
+                        "formula_pattern": "Text comments/check notes",
+                        "row_start": 10,
+                        "row_end": 59,
+                        "sheet_name": "FS",
+                        "confidence": 0.8,
+                        "evidence": [
+                            "Despite header resembling INC in Hebrew, visible cells contain note/comment text rather than numeric balances.",
+                            "Therefore not treated as entity_value."
+                        ]
+                    },
+                    {
+                        "col_idx": 19,
+                        "col_letter": "T",
+                        "role": "other",
+                        "entity": "",
+                        "currency": "",
+                        "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                        "header_text": "הערות",
+                        "formula_pattern": "Text comments",
+                        "row_start": 10,
+                        "row_end": 59,
+                        "sheet_name": "FS",
+                        "confidence": 0.98,
+                        "evidence": [
+                            "Header means notes/comments.",
+                            "Visible contents are narrative remarks."
                         ]
                     }
                 ],
-                "quality_flags": [
-                    "missing_entity_column",
-                    "consolidated_without_entities",
-                    "aje_without_entity_columns"
-                ],
-                "confidence": 0.839
+                "quality_flags": [],
+                "confidence": 0.9076
             }
         ],
         "entities": [
             "LTD",
-            "INC"
+            "INC",
+            "Consolidated",
+            "US management view"
         ],
         "has_consolidated": true,
-        "consolidated_formula_pattern": "=SUM(E11+I11)",
+        "consolidated_formula_pattern": "=SUM(Erow+Irow)",
         "has_aje": true,
         "aje_types": [
             "per-entity"
         ],
         "has_nis": true,
         "quality_flags": [
-            "missing_entity_column",
-            "consolidated_without_entities",
-            "aje_without_entity_columns",
-            "multi-entity workbook",
-            "clear consolidation logic",
-            "AJE sheets referenced",
-            "currency duality (NIS/USD)"
+            "mixed currencies across workbook (NIS/ILS/USD)",
+            "mixed purposes: statutory consolidation and management reporting",
+            "period mismatch between statutory 2022 and management 2023 views",
+            "some sheets contain #REF! errors per analysis",
+            "only subset of sheets analyzed directly; some classifications inferred from names"
         ],
         "main_sheet_name": "FS",
         "entity_currency_pairs": [
             {
                 "entity": "LTD",
-                "currency": "NIS",
+                "currency": "USD",
                 "sheet_name": "FS",
                 "header": "LTD",
-                "column": "D",
-                "confidence": 0.95,
+                "column": "C",
+                "confidence": 0.93,
                 "source": "sheet_company+sheet_currency+workbook_structure"
             },
             {
@@ -319,76 +931,149 @@ More?   -d "{\"run_id\":\"run-1\",\"workbook_path\":\"C:\\\\Users\\\\morga\\\\De
                 "currency": "USD",
                 "sheet_name": "FS",
                 "header": "INC",
-                "column": "J",
-                "confidence": 0.9,
+                "column": "I",
+                "confidence": 0.93,
                 "source": "sheet_company+sheet_currency+workbook_structure"
+            },
+            {
+                "entity": "Consolidated",
+                "currency": "USD",
+                "sheet_name": "FS",
+                "header": "Consolidated",
+                "column": "M",
+                "confidence": 0.93,
+                "source": "sheet_company+sheet_currency+workbook_structure"
+            },
+            {
+                "entity": "US management view",
+                "currency": "USD",
+                "sheet_name": "FS",
+                "header": "",
+                "column": "",
+                "confidence": 0.5459999999999999,
+                "source": "workbook_structure"
             }
         ],
         "companies_table": [
             {
+                "entity": "Consolidated",
+                "sheet": "FS",
+                "source": "sheet_company+workbook_structure",
+                "header": "Consolidated",
+                "column": "M",
+                "confidence": 0.98
+            },
+            {
                 "entity": "INC",
                 "sheet": "FS",
                 "source": "sheet_company+workbook_structure",
                 "header": "INC",
-                "column": "J",
-                "confidence": 0.95
+                "column": "I",
+                "confidence": 0.99
             },
             {
                 "entity": "LTD",
                 "sheet": "FS",
                 "source": "sheet_company+workbook_structure",
                 "header": "LTD",
-                "column": "D",
-                "confidence": 0.95
+                "column": "C",
+                "confidence": 0.99
+            },
+            {
+                "entity": "US management view",
+                "sheet": "FS",
+                "source": "workbook_structure",
+                "header": "",
+                "column": "",
+                "confidence": 0.546
             }
         ],
         "currencies_table": [
+            {
+                "entity": "Consolidated",
+                "currency": "USD",
+                "sheet": "FS",
+                "header": "Consolidated",
+                "column": "M",
+                "confidence": 0.93,
+                "source": "sheet_company+sheet_currency+workbook_structure"
+            },
             {
                 "entity": "INC",
                 "currency": "USD",
                 "sheet": "FS",
                 "header": "INC",
-                "column": "J",
-                "confidence": 0.9,
+                "column": "I",
+                "confidence": 0.93,
                 "source": "sheet_company+sheet_currency+workbook_structure"
             },
             {
                 "entity": "LTD",
-                "currency": "NIS",
+                "currency": "USD",
                 "sheet": "FS",
                 "header": "LTD",
-                "column": "D",
-                "confidence": 0.95,
+                "column": "C",
+                "confidence": 0.93,
                 "source": "sheet_company+sheet_currency+workbook_structure"
+            },
+            {
+                "entity": "US management view",
+                "currency": "USD",
+                "sheet": "FS",
+                "header": "",
+                "column": "",
+                "confidence": 0.546,
+                "source": "workbook_structure"
             }
         ],
         "workbook_structure_entities": [
             {
                 "name": "LTD",
                 "currency": "NIS",
-                "confidence": 0.9,
+                "confidence": 0.96,
                 "evidence": [
-                    "FS!B4 references WP_LTD",
-                    "Header 'In NIS'",
-                    "Column labeled 'LTD'"
+                    "FS headers include 'LTD'",
+                    "sheet names GL_LTD, AJE_LTD, WP_LTD, Accounts_LTD",
+                    "WP_LTD is a balance-sheet working paper in NIS"
                 ]
             },
             {
                 "name": "INC",
-                "currency": "USD",
-                "confidence": 0.9,
+                "currency": "NIS",
+                "confidence": 0.86,
                 "evidence": [
-                    "FS sheet columns labeled 'INC' and '$'",
-                    "Formulas reference GL_INC"
+                    "FS headers include 'INC'",
+                    "sheet names GL_INC, AJE_INC, Accounts_INC, TB INC",
+                    "FS consolidates LTD and INC into NIS presentation"
+                ]
+            },
+            {
+                "name": "Consolidated",
+                "currency": "NIS",
+                "confidence": 0.94,
+                "evidence": [
+                    "FS headers include 'Consolidated'",
+                    "title 'Financial Statements'",
+                    "formulas SUMIF from GL_LTD and GL_INC with AJE columns"
+                ]
+            },
+            {
+                "name": "US management view",
+                "currency": "USD",
+                "confidence": 0.78,
+                "evidence": [
+                    "BOD Slides labeled 'US K$'",
+                    "Actual vs Budget uses $ with monthly/quarter/YTD operating metrics",
+                    "Reports sheet presents statements in USD in thousands"
                 ]
             }
         ]
     },
     "final_render": {
-        "text": "EXTRACTION STATUS: ~ PARTIAL\n  Main sheet     : FS\n  Sheets         : 1\n  Key columns    : 3 found / 5 expected\n  Matches        : 3 exact | 0 partial | 2 missing\n  Entities found : 2  |  Consolidated: yes  |  AJE: yes  |  NIS: yes\n  Blocking flags : missing_entity_column, consolidated_without_entities, aje_without_entity_columns\n\nCOMPARISON: 5 expected | 3 exact | 0 partial | 2 missing | completeness 60.0%\n  EXACT:\n    ✓ coa_name             entity=-           → col C  conf=0.95\n    ✓ aje                  entity=-           → col K  conf=0.70\n    ✓ consolidated         entity=-           → col M  conf=0.73\n  MISSING:\n    ✗ entity_value         entity=LTD         — not found\n    ✗ entity_value         entity=INC         — not found\n\nSHEET: FS | Contains: BS | Unit: NIS | Data rows: 10-186\n\nCOLUMN: C(3) | Role: coa_name | Entity:  | Currency:  | Period: 2022-12-31 | Header: Account name / description | Formula:  | RowStart: 10 | RowEnd: 59 | SheetName: FS\nCOLUMN: K(11) | Role: aje | Entity:  | Currency:  | Period: 2022-12-31 | Header: AJE | Formula:  | RowStart: 167 | RowEnd: 186 | SheetName: FS\nCOLUMN: M(13) | Role: consolidated | Entity: Consolidated | Currency: USD | Period: 2022-12-31 | Header: Consolidated | $ | Formula:  | RowStart: 167 | RowEnd: 186 | SheetName: FS\nCOLUMN: P(16) | Role: budget | Entity:  | Currency:  | Period: 2022-12-31 | Header: Budget | Formula:  | RowStart: 167 | RowEnd: 186 | SheetName: FS\n\nMAIN_SHEET: FS\nENTITIES: 2 entities: LTD, INC\nCONSOLIDATED: yes - formula pattern: =SUM(E11+I11)\nAJE: yes - types found: per-entity\nNIS: yes\n\nCOMPANIES:\n  ENTITY: INC | Sheet: FS | Column: J | Header: INC | Source: sheet_company+workbook_structure | Confidence: 0.950\n  ENTITY: LTD | Sheet: FS | Column: D | Header: LTD | Source: sheet_company+workbook_structure | Confidence: 0.950\n\nCURRENCIES:\n  ENTITY: INC | Currency: USD | Sheet: FS | Column: J | Source: sheet_company+sheet_currency+workbook_structure | Confidence: 0.900\n  ENTITY: LTD | Currency: NIS | Sheet: FS | Column: D | Source: sheet_company+sheet_currency+workbook_structure | Confidence: 0.950",
+        "text": "EXTRACTION STATUS: ~ PARTIAL\n  Main sheet     : FS\n  Sheets         : 1\n  Key columns    : 7 found / 7 expected\n  Matches        : 6 exact | 1 partial | 0 missing\n  Entities found : 4  |  Consolidated: yes  |  AJE: yes  |  NIS: yes\n\nCOMPARISON: 7 expected | 6 exact | 1 partial | 0 missing | completeness 100.0%\n  EXACT:\n    ✓ coa_name             entity=-           → col C  conf=0.98\n    ✓ entity_value         entity=LTD         → col F  conf=0.67\n    ✓ entity_value         entity=INC         → col J  conf=0.84\n    ✓ entity_value         entity=Consolidated  → col M  conf=0.74 [currency mismatch: expected=NIS actual=USD]\n    ✓ aje                  entity=-           → col L  conf=0.90\n    ✓ consolidated         entity=-           → col N  conf=0.92\n  PARTIAL:\n    ~ entity_value         entity=US management view  → col J  [entity mismatch: expected='US management view' actual='INC']\n\nSHEET: FS | Contains: BS | Unit: NIS | Data rows: 9-186\n\nCOLUMN: B(2) | Role: other | Entity:  | Currency:  | Period: Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting | Header:  | Formula:  | RowStart: 10 | RowEnd: 59 | SheetName: FS\nCOLUMN: C(3) | Role: coa_name | Entity:  | Currency:  | Period: Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting | Header:  | Formula: Text labels / account descriptions | RowStart: 9 | RowEnd: 59 | SheetName: FS\nCOLUMN: D(4) | Role: other | Entity:  | Currency: NIS | Period: Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting | Header: LTD | Formula: =SUMIF(GL_LTD!$J:$J,Arow,GL_LTD!$I:$I) | RowStart: 10 | RowEnd: 59 | SheetName: FS\nCOLUMN: F(6) | Role: entity_value | Entity: LTD | Currency: NIS | Period: Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting | Header: LTD / $ | Formula: =SUMIF(GL_LTD!$J:$J,Arow,GL_LTD!$G:$G) | RowStart: 10 | RowEnd: 59 | SheetName: FS\nCOLUMN: H(8) | Role: other | Entity:  | Currency:  | Period: Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting | Header:  | Formula: =IFERROR(Crow/Erow,0) | RowStart: 10 | RowEnd: 59 | SheetName: FS\nCOLUMN: J(10) | Role: entity_value | Entity: INC | Currency: NIS | Period: Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting | Header: INC / $ | Formula: =SUMIF(GL_INC!G:G,Arow,GL_INC!F:F) | RowStart: 10 | RowEnd: 59 | SheetName: FS\nCOLUMN: K(11) | Role: aje | Entity:  | Currency:  | Period: Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting | Header: AJE | Formula:  | RowStart: 167 | RowEnd: 186 | SheetName: FS\nCOLUMN: L(12) | Role: aje | Entity:  | Currency:  | Period: Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting | Header: AJE | Formula:  | RowStart: 10 | RowEnd: 59 | SheetName: FS\nCOLUMN: M(13) | Role: entity_value | Entity: Consolidated | Currency: USD | Period: Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting | Header: Consolidated | $ | Formula:  | RowStart: 167 | RowEnd: 186 | SheetName: FS\nCOLUMN: N(14) | Role: consolidated | Entity: Consolidated | Currency: NIS | Period: Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting | Header: Consolidated / $ | Formula: =SUM(Erow+Irow) | RowStart: 10 | RowEnd: 59 | SheetName: FS\nCOLUMN: P(16) | Role: prior_period | Entity:  | Currency:  | Period: 2022-12-31 | Header: 2022-12-31T00:00:00 | Formula: Mostly hardcoded numeric prior balances / sums | RowStart: 10 | RowEnd: 59 | SheetName: FS\nCOLUMN: Q(17) | Role: budget | Entity:  | Currency:  | Period: Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting | Header: Budget | Formula:  | RowStart: 10 | RowEnd: 59 | SheetName: FS\nCOLUMN: R(18) | Role: other | Entity:  | Currency:  | Period: Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting | Header: ישראל | Formula: Text comments/check notes | RowStart: 10 | RowEnd: 59 | SheetName: FS\nCOLUMN: S(19) | Role: other | Entity:  | Currency:  | Period: Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting | Header: אינק | Formula: Text comments/check notes | RowStart: 10 | RowEnd: 59 | SheetName: FS\nCOLUMN: T(20) | Role: other | Entity:  | Currency:  | Period: Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting | Header: הערות | Formula: Text comments | RowStart: 10 | RowEnd: 59 | SheetName: FS\n\nMAIN_SHEET: FS\nENTITIES: 4 entities: LTD, INC, Consolidated, US management view\nCONSOLIDATED: yes - formula pattern: =SUM(Erow+Irow)\nAJE: yes - types found: per-entity\nNIS: yes\n\nCOMPANIES:\n  ENTITY: Consolidated | Sheet: FS | Column: M | Header: Consolidated | Source: sheet_company+workbook_structure | Confidence: 0.980\n  ENTITY: INC | Sheet: FS | Column: I | Header: INC | Source: sheet_company+workbook_structure | Confidence: 0.990\n  ENTITY: LTD | Sheet: FS | Column: C | Header: LTD | Source: sheet_company+workbook_structure | Confidence: 0.990\n  ENTITY: US management view | Sheet: FS | Column:  | Header:  | Source: workbook_structure | Confidence: 0.546\n\nCURRENCIES:\n  ENTITY: Consolidated | Currency: USD | Sheet: FS | Column: M | Source: sheet_company+sheet_currency+workbook_structure | Confidence: 0.930\n  ENTITY: INC | Currency: USD | Sheet: FS | Column: I | Source: sheet_company+sheet_currency+workbook_structure | Confidence: 0.930\n  ENTITY: LTD | Currency: USD | Sheet: FS | Column: C | Source: sheet_company+sheet_currency+workbook_structure | Confidence: 0.930\n  ENTITY: US management view | Currency: USD | Sheet: FS | Column:  | Source: workbook_structure | Confidence: 0.546",
         "sheets_count": 1,
-        "columns_count": 4,
-        "entities_count": 2,
+        "columns_count": 15,
+        "entities_count": 4,
         "key_columns_table": [
             {
                 "column": "C",
@@ -396,11 +1081,35 @@ More?   -d "{\"run_id\":\"run-1\",\"workbook_path\":\"C:\\\\Users\\\\morga\\\\De
                 "role": "coa_name",
                 "entity": "",
                 "currency": "",
+                "row_start": 9,
+                "row_end": 59,
+                "header": "",
+                "formula": "Text labels / account descriptions",
+                "confidence": 0.98
+            },
+            {
+                "column": "F",
+                "sheet": "FS",
+                "role": "entity_value",
+                "entity": "LTD",
+                "currency": "NIS",
                 "row_start": 10,
                 "row_end": 59,
-                "header": "Account name / description",
-                "formula": "",
-                "confidence": 0.95
+                "header": "LTD / $",
+                "formula": "=SUMIF(GL_LTD!$J:$J,Arow,GL_LTD!$G:$G)",
+                "confidence": 0.67
+            },
+            {
+                "column": "J",
+                "sheet": "FS",
+                "role": "entity_value",
+                "entity": "INC",
+                "currency": "NIS",
+                "row_start": 10,
+                "row_end": 59,
+                "header": "INC / $",
+                "formula": "=SUMIF(GL_INC!G:G,Arow,GL_INC!F:F)",
+                "confidence": 0.84
             },
             {
                 "column": "K",
@@ -415,19 +1124,57 @@ More?   -d "{\"run_id\":\"run-1\",\"workbook_path\":\"C:\\\\Users\\\\morga\\\\De
                 "confidence": 0.7
             },
             {
+                "column": "L",
+                "sheet": "FS",
+                "role": "aje",
+                "entity": "",
+                "currency": "",
+                "row_start": 10,
+                "row_end": 59,
+                "header": "AJE",
+                "formula": "",
+                "confidence": 0.9
+            },
+            {
                 "column": "M",
                 "sheet": "FS",
-                "role": "consolidated",
+                "role": "entity_value",
                 "entity": "Consolidated",
                 "currency": "USD",
                 "row_start": 167,
                 "row_end": 186,
                 "header": "Consolidated | $",
                 "formula": "",
-                "confidence": 0.73
+                "confidence": 0.74
+            },
+            {
+                "column": "N",
+                "sheet": "FS",
+                "role": "consolidated",
+                "entity": "Consolidated",
+                "currency": "NIS",
+                "row_start": 10,
+                "row_end": 59,
+                "header": "Consolidated / $",
+                "formula": "=SUM(Erow+Irow)",
+                "confidence": 0.92
             }
         ],
         "all_columns_table": [
+            {
+                "column": "B",
+                "index": 2,
+                "sheet": "FS",
+                "role": "other",
+                "entity": "",
+                "currency": "",
+                "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                "row_start": 10,
+                "row_end": 59,
+                "header": "",
+                "formula": "",
+                "confidence": 0.97
+            },
             {
                 "column": "C",
                 "index": 3,
@@ -435,12 +1182,68 @@ More?   -d "{\"run_id\":\"run-1\",\"workbook_path\":\"C:\\\\Users\\\\morga\\\\De
                 "role": "coa_name",
                 "entity": "",
                 "currency": "",
-                "period": "2022-12-31",
+                "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                "row_start": 9,
+                "row_end": 59,
+                "header": "",
+                "formula": "Text labels / account descriptions",
+                "confidence": 0.98
+            },
+            {
+                "column": "D",
+                "index": 4,
+                "sheet": "FS",
+                "role": "other",
+                "entity": "",
+                "currency": "NIS",
+                "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
                 "row_start": 10,
                 "row_end": 59,
-                "header": "Account name / description",
-                "formula": "",
+                "header": "LTD",
+                "formula": "=SUMIF(GL_LTD!$J:$J,Arow,GL_LTD!$I:$I)",
+                "confidence": 0.52
+            },
+            {
+                "column": "F",
+                "index": 6,
+                "sheet": "FS",
+                "role": "entity_value",
+                "entity": "LTD",
+                "currency": "NIS",
+                "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                "row_start": 10,
+                "row_end": 59,
+                "header": "LTD / $",
+                "formula": "=SUMIF(GL_LTD!$J:$J,Arow,GL_LTD!$G:$G)",
+                "confidence": 0.67
+            },
+            {
+                "column": "H",
+                "index": 8,
+                "sheet": "FS",
+                "role": "other",
+                "entity": "",
+                "currency": "",
+                "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                "row_start": 10,
+                "row_end": 59,
+                "header": "",
+                "formula": "=IFERROR(Crow/Erow,0)",
                 "confidence": 0.95
+            },
+            {
+                "column": "J",
+                "index": 10,
+                "sheet": "FS",
+                "role": "entity_value",
+                "entity": "INC",
+                "currency": "NIS",
+                "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                "row_start": 10,
+                "row_end": 59,
+                "header": "INC / $",
+                "formula": "=SUMIF(GL_INC!G:G,Arow,GL_INC!F:F)",
+                "confidence": 0.84
             },
             {
                 "column": "K",
@@ -449,7 +1252,7 @@ More?   -d "{\"run_id\":\"run-1\",\"workbook_path\":\"C:\\\\Users\\\\morga\\\\De
                 "role": "aje",
                 "entity": "",
                 "currency": "",
-                "period": "2022-12-31",
+                "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
                 "row_start": 167,
                 "row_end": 186,
                 "header": "AJE",
@@ -457,91 +1260,205 @@ More?   -d "{\"run_id\":\"run-1\",\"workbook_path\":\"C:\\\\Users\\\\morga\\\\De
                 "confidence": 0.7
             },
             {
+                "column": "L",
+                "index": 12,
+                "sheet": "FS",
+                "role": "aje",
+                "entity": "",
+                "currency": "",
+                "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                "row_start": 10,
+                "row_end": 59,
+                "header": "AJE",
+                "formula": "",
+                "confidence": 0.9
+            },
+            {
                 "column": "M",
                 "index": 13,
                 "sheet": "FS",
-                "role": "consolidated",
+                "role": "entity_value",
                 "entity": "Consolidated",
                 "currency": "USD",
-                "period": "2022-12-31",
+                "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
                 "row_start": 167,
                 "row_end": 186,
                 "header": "Consolidated | $",
                 "formula": "",
-                "confidence": 0.73
+                "confidence": 0.74
+            },
+            {
+                "column": "N",
+                "index": 14,
+                "sheet": "FS",
+                "role": "consolidated",
+                "entity": "Consolidated",
+                "currency": "NIS",
+                "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                "row_start": 10,
+                "row_end": 59,
+                "header": "Consolidated / $",
+                "formula": "=SUM(Erow+Irow)",
+                "confidence": 0.92
             },
             {
                 "column": "P",
                 "index": 16,
                 "sheet": "FS",
-                "role": "budget",
+                "role": "prior_period",
                 "entity": "",
                 "currency": "",
                 "period": "2022-12-31",
-                "row_start": 167,
-                "row_end": 186,
+                "row_start": 10,
+                "row_end": 59,
+                "header": "2022-12-31T00:00:00",
+                "formula": "Mostly hardcoded numeric prior balances / sums",
+                "confidence": 0.95
+            },
+            {
+                "column": "Q",
+                "index": 17,
+                "sheet": "FS",
+                "role": "budget",
+                "entity": "",
+                "currency": "",
+                "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                "row_start": 10,
+                "row_end": 59,
                 "header": "Budget",
                 "formula": "",
-                "confidence": 0.68
+                "confidence": 0.99
+            },
+            {
+                "column": "R",
+                "index": 18,
+                "sheet": "FS",
+                "role": "other",
+                "entity": "",
+                "currency": "",
+                "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                "row_start": 10,
+                "row_end": 59,
+                "header": "ישראל",
+                "formula": "Text comments/check notes",
+                "confidence": 0.88
+            },
+            {
+                "column": "S",
+                "index": 19,
+                "sheet": "FS",
+                "role": "other",
+                "entity": "",
+                "currency": "",
+                "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                "row_start": 10,
+                "row_end": 59,
+                "header": "אינק",
+                "formula": "Text comments/check notes",
+                "confidence": 0.8
+            },
+            {
+                "column": "T",
+                "index": 20,
+                "sheet": "FS",
+                "role": "other",
+                "entity": "",
+                "currency": "",
+                "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                "row_start": 10,
+                "row_end": 59,
+                "header": "הערות",
+                "formula": "Text comments",
+                "confidence": 0.98
             }
         ],
         "companies_table": [
+            {
+                "entity": "Consolidated",
+                "sheet": "FS",
+                "source": "sheet_company+workbook_structure",
+                "header": "Consolidated",
+                "column": "M",
+                "confidence": 0.98
+            },
             {
                 "entity": "INC",
                 "sheet": "FS",
                 "source": "sheet_company+workbook_structure",
                 "header": "INC",
-                "column": "J",
-                "confidence": 0.95
+                "column": "I",
+                "confidence": 0.99
             },
             {
                 "entity": "LTD",
                 "sheet": "FS",
                 "source": "sheet_company+workbook_structure",
                 "header": "LTD",
-                "column": "D",
-                "confidence": 0.95
+                "column": "C",
+                "confidence": 0.99
+            },
+            {
+                "entity": "US management view",
+                "sheet": "FS",
+                "source": "workbook_structure",
+                "header": "",
+                "column": "",
+                "confidence": 0.546
             }
         ],
         "currencies_table": [
+            {
+                "entity": "Consolidated",
+                "currency": "USD",
+                "sheet": "FS",
+                "header": "Consolidated",
+                "column": "M",
+                "confidence": 0.93,
+                "source": "sheet_company+sheet_currency+workbook_structure"
+            },
             {
                 "entity": "INC",
                 "currency": "USD",
                 "sheet": "FS",
                 "header": "INC",
-                "column": "J",
-                "confidence": 0.9,
+                "column": "I",
+                "confidence": 0.93,
                 "source": "sheet_company+sheet_currency+workbook_structure"
             },
             {
                 "entity": "LTD",
-                "currency": "NIS",
+                "currency": "USD",
                 "sheet": "FS",
                 "header": "LTD",
-                "column": "D",
-                "confidence": 0.95,
+                "column": "C",
+                "confidence": 0.93,
                 "source": "sheet_company+sheet_currency+workbook_structure"
+            },
+            {
+                "entity": "US management view",
+                "currency": "USD",
+                "sheet": "FS",
+                "header": "",
+                "column": "",
+                "confidence": 0.546,
+                "source": "workbook_structure"
             }
         ],
         "summary": {
             "status": "partial",
             "main_sheet": "FS",
             "sheets_processed": 1,
-            "expected_key_columns": 5,
-            "actual_key_columns": 3,
-            "exact_matches": 3,
-            "partial_matches": 0,
-            "missing_columns": 2,
-            "entities_found": 2,
+            "expected_key_columns": 7,
+            "actual_key_columns": 7,
+            "exact_matches": 6,
+            "partial_matches": 1,
+            "missing_columns": 0,
+            "entities_found": 4,
             "has_consolidated": true,
             "has_aje": true,
             "has_nis": true,
-            "quality_flag_count": 7,
-            "blocking_flags": [
-                "missing_entity_column",
-                "consolidated_without_entities",
-                "aje_without_entity_columns"
-            ]
+            "quality_flag_count": 5,
+            "blocking_flags": []
         },
         "comparison": {
             "exact": [
@@ -560,14 +1477,86 @@ More?   -d "{\"run_id\":\"run-1\",\"workbook_path\":\"C:\\\\Users\\\\morga\\\\De
                         "role": "coa_name",
                         "entity": "",
                         "currency": "",
-                        "period": "2022-12-31",
-                        "row_start": 10,
+                        "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                        "row_start": 9,
                         "row_end": 59,
-                        "header": "Account name / description",
-                        "formula": "",
-                        "confidence": 0.95
+                        "header": "",
+                        "formula": "Text labels / account descriptions",
+                        "confidence": 0.98
                     },
                     "notes": ""
+                },
+                {
+                    "expected": {
+                        "role": "entity_value",
+                        "entity": "LTD",
+                        "currency": "NIS",
+                        "source": "workbook_structure.entities[LTD]"
+                    },
+                    "match_type": "exact",
+                    "actual_column": {
+                        "column": "F",
+                        "index": 6,
+                        "sheet": "FS",
+                        "role": "entity_value",
+                        "entity": "LTD",
+                        "currency": "NIS",
+                        "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                        "row_start": 10,
+                        "row_end": 59,
+                        "header": "LTD / $",
+                        "formula": "=SUMIF(GL_LTD!$J:$J,Arow,GL_LTD!$G:$G)",
+                        "confidence": 0.67
+                    },
+                    "notes": ""
+                },
+                {
+                    "expected": {
+                        "role": "entity_value",
+                        "entity": "INC",
+                        "currency": "NIS",
+                        "source": "workbook_structure.entities[INC]"
+                    },
+                    "match_type": "exact",
+                    "actual_column": {
+                        "column": "J",
+                        "index": 10,
+                        "sheet": "FS",
+                        "role": "entity_value",
+                        "entity": "INC",
+                        "currency": "NIS",
+                        "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                        "row_start": 10,
+                        "row_end": 59,
+                        "header": "INC / $",
+                        "formula": "=SUMIF(GL_INC!G:G,Arow,GL_INC!F:F)",
+                        "confidence": 0.84
+                    },
+                    "notes": ""
+                },
+                {
+                    "expected": {
+                        "role": "entity_value",
+                        "entity": "Consolidated",
+                        "currency": "NIS",
+                        "source": "workbook_structure.entities[Consolidated]"
+                    },
+                    "match_type": "exact",
+                    "actual_column": {
+                        "column": "M",
+                        "index": 13,
+                        "sheet": "FS",
+                        "role": "entity_value",
+                        "entity": "Consolidated",
+                        "currency": "USD",
+                        "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                        "row_start": 167,
+                        "row_end": 186,
+                        "header": "Consolidated | $",
+                        "formula": "",
+                        "confidence": 0.74
+                    },
+                    "notes": "currency mismatch: expected=NIS actual=USD"
                 },
                 {
                     "expected": {
@@ -578,18 +1567,18 @@ More?   -d "{\"run_id\":\"run-1\",\"workbook_path\":\"C:\\\\Users\\\\morga\\\\De
                     },
                     "match_type": "exact",
                     "actual_column": {
-                        "column": "K",
-                        "index": 11,
+                        "column": "L",
+                        "index": 12,
                         "sheet": "FS",
                         "role": "aje",
                         "entity": "",
                         "currency": "",
-                        "period": "2022-12-31",
-                        "row_start": 167,
-                        "row_end": 186,
+                        "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                        "row_start": 10,
+                        "row_end": 59,
                         "header": "AJE",
                         "formula": "",
-                        "confidence": 0.7
+                        "confidence": 0.9
                     },
                     "notes": ""
                 },
@@ -602,47 +1591,49 @@ More?   -d "{\"run_id\":\"run-1\",\"workbook_path\":\"C:\\\\Users\\\\morga\\\\De
                     },
                     "match_type": "exact",
                     "actual_column": {
-                        "column": "M",
-                        "index": 13,
+                        "column": "N",
+                        "index": 14,
                         "sheet": "FS",
                         "role": "consolidated",
                         "entity": "Consolidated",
-                        "currency": "USD",
-                        "period": "2022-12-31",
-                        "row_start": 167,
-                        "row_end": 186,
-                        "header": "Consolidated | $",
-                        "formula": "",
-                        "confidence": 0.73
+                        "currency": "NIS",
+                        "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                        "row_start": 10,
+                        "row_end": 59,
+                        "header": "Consolidated / $",
+                        "formula": "=SUM(Erow+Irow)",
+                        "confidence": 0.92
                     },
                     "notes": ""
                 }
             ],
-            "partial": [],
-            "missing": [
+            "partial": [
                 {
                     "expected": {
                         "role": "entity_value",
-                        "entity": "LTD",
-                        "currency": "NIS",
-                        "source": "workbook_structure.entities[LTD]"
+                        "entity": "US management view",
+                        "currency": "USD",
+                        "source": "workbook_structure.entities[US management view]"
                     },
-                    "match_type": "missing",
-                    "actual_column": null,
-                    "notes": "No column with role='entity_value' found in any sheet"
-                },
-                {
-                    "expected": {
+                    "match_type": "partial",
+                    "actual_column": {
+                        "column": "J",
+                        "index": 10,
+                        "sheet": "FS",
                         "role": "entity_value",
                         "entity": "INC",
-                        "currency": "USD",
-                        "source": "workbook_structure.entities[INC]"
+                        "currency": "NIS",
+                        "period": "Primarily 2022-12-31 for statutory FS/consolidation, with 2023 monthly/quarterly management reporting",
+                        "row_start": 10,
+                        "row_end": 59,
+                        "header": "INC / $",
+                        "formula": "=SUMIF(GL_INC!G:G,Arow,GL_INC!F:F)",
+                        "confidence": 0.84
                     },
-                    "match_type": "missing",
-                    "actual_column": null,
-                    "notes": "No column with role='entity_value' found in any sheet"
+                    "notes": "entity mismatch: expected='US management view' actual='INC'"
                 }
-            ]
+            ],
+            "missing": []
         },
         "normalized_output": [
             {
@@ -652,15 +1643,15 @@ More?   -d "{\"run_id\":\"run-1\",\"workbook_path\":\"C:\\\\Users\\\\morga\\\\De
                 "match_type": "exact",
                 "notes": "",
                 "source": "workbook_structure.has_aje",
-                "column": "K",
+                "column": "L",
                 "sheet": "FS",
                 "actual_role": "aje",
                 "actual_entity": "",
                 "actual_currency": "",
                 "header": "AJE",
-                "confidence": 0.7,
-                "row_start": 167,
-                "row_end": 186
+                "confidence": 0.9,
+                "row_start": 10,
+                "row_end": 59
             },
             {
                 "expected_role": "coa_name",
@@ -674,9 +1665,9 @@ More?   -d "{\"run_id\":\"run-1\",\"workbook_path\":\"C:\\\\Users\\\\morga\\\\De
                 "actual_role": "coa_name",
                 "actual_entity": "",
                 "actual_currency": "",
-                "header": "Account name / description",
-                "confidence": 0.95,
-                "row_start": 10,
+                "header": "",
+                "confidence": 0.98,
+                "row_start": 9,
                 "row_end": 59
             },
             {
@@ -686,49 +1677,83 @@ More?   -d "{\"run_id\":\"run-1\",\"workbook_path\":\"C:\\\\Users\\\\morga\\\\De
                 "match_type": "exact",
                 "notes": "",
                 "source": "workbook_structure.has_consolidated",
-                "column": "M",
+                "column": "N",
                 "sheet": "FS",
                 "actual_role": "consolidated",
                 "actual_entity": "Consolidated",
-                "actual_currency": "USD",
-                "header": "Consolidated | $",
-                "confidence": 0.73,
-                "row_start": 167,
-                "row_end": 186
+                "actual_currency": "NIS",
+                "header": "Consolidated / $",
+                "confidence": 0.92,
+                "row_start": 10,
+                "row_end": 59
             },
             {
                 "expected_role": "entity_value",
                 "expected_entity": "LTD",
                 "expected_currency": "NIS",
-                "match_type": "missing",
-                "notes": "No column with role='entity_value' found in any sheet",
+                "match_type": "exact",
+                "notes": "",
                 "source": "workbook_structure.entities[LTD]",
-                "column": "",
-                "sheet": "",
-                "actual_role": "",
-                "actual_entity": "",
-                "actual_currency": "",
-                "header": "",
-                "confidence": 0.0,
-                "row_start": null,
-                "row_end": null
+                "column": "F",
+                "sheet": "FS",
+                "actual_role": "entity_value",
+                "actual_entity": "LTD",
+                "actual_currency": "NIS",
+                "header": "LTD / $",
+                "confidence": 0.67,
+                "row_start": 10,
+                "row_end": 59
             },
             {
                 "expected_role": "entity_value",
                 "expected_entity": "INC",
-                "expected_currency": "USD",
-                "match_type": "missing",
-                "notes": "No column with role='entity_value' found in any sheet",
+                "expected_currency": "NIS",
+                "match_type": "exact",
+                "notes": "",
                 "source": "workbook_structure.entities[INC]",
-                "column": "",
-                "sheet": "",
-                "actual_role": "",
-                "actual_entity": "",
-                "actual_currency": "",
-                "header": "",
-                "confidence": 0.0,
-                "row_start": null,
-                "row_end": null
+                "column": "J",
+                "sheet": "FS",
+                "actual_role": "entity_value",
+                "actual_entity": "INC",
+                "actual_currency": "NIS",
+                "header": "INC / $",
+                "confidence": 0.84,
+                "row_start": 10,
+                "row_end": 59
+            },
+            {
+                "expected_role": "entity_value",
+                "expected_entity": "Consolidated",
+                "expected_currency": "NIS",
+                "match_type": "exact",
+                "notes": "currency mismatch: expected=NIS actual=USD",
+                "source": "workbook_structure.entities[Consolidated]",
+                "column": "M",
+                "sheet": "FS",
+                "actual_role": "entity_value",
+                "actual_entity": "Consolidated",
+                "actual_currency": "USD",
+                "header": "Consolidated | $",
+                "confidence": 0.74,
+                "row_start": 167,
+                "row_end": 186
+            },
+            {
+                "expected_role": "entity_value",
+                "expected_entity": "US management view",
+                "expected_currency": "USD",
+                "match_type": "partial",
+                "notes": "entity mismatch: expected='US management view' actual='INC'",
+                "source": "workbook_structure.entities[US management view]",
+                "column": "J",
+                "sheet": "FS",
+                "actual_role": "entity_value",
+                "actual_entity": "INC",
+                "actual_currency": "NIS",
+                "header": "INC / $",
+                "confidence": 0.84,
+                "row_start": 10,
+                "row_end": 59
             }
         ]
     }

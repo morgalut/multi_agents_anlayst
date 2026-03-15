@@ -33,6 +33,7 @@ class MCPTransport:
 class ExcelClientConfig:
     server_id: str = "excel-mcp"
     max_error_body_chars: int = 4000
+    timeout_seconds: Optional[float] = None
 
 
 class ExcelClientError(RuntimeError):
@@ -191,78 +192,76 @@ class ExcelMCPClient:
     def _call_tool(self, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         ctx = self._build_ctx()
 
-        attempts = 2 if tool_name == "excel.get_formulas" else 1
-        last_exc: Optional[BaseException] = None
+        try:
+            resp = self._t.call_tool(self._cfg.server_id, tool_name, args, ctx=ctx)
 
-        for attempt in range(1, attempts + 1):
-            try:
-                resp = self._t.call_tool(self._cfg.server_id, tool_name, args, ctx=ctx)
-
-                if not isinstance(resp, dict):
-                    raise ExcelClientError(
-                        f"Invalid MCP response type for tool: {tool_name}",
-                        server_id=self._cfg.server_id,
-                        tool_name=tool_name,
-                        args=args,
-                        response_body=repr(resp),
-                    )
-
-                if "error" in resp and resp["error"]:
-                    raise ExcelClientError(
-                        f"MCP tool returned logical error: {tool_name}",
-                        server_id=self._cfg.server_id,
-                        tool_name=tool_name,
-                        args=args,
-                        response_body=self._stringify(resp["error"]),
-                    )
-
-                return resp
-
-            except HTTPError as exc:
-                body = self._read_http_error_body(exc)
+            if not isinstance(resp, dict):
                 raise ExcelClientError(
-                    f"MCP tool failed with HTTP {getattr(exc, 'code', None)}: {tool_name}",
+                    f"Invalid MCP response type for tool={tool_name}",
                     server_id=self._cfg.server_id,
                     tool_name=tool_name,
                     args=args,
-                    status_code=getattr(exc, "code", None),
-                    response_body=body,
-                    cause=exc,
-                ) from exc
+                    response_body=repr(resp),
+                )
 
-            except (TimeoutError, socket.timeout) as exc:
-                last_exc = exc
-                if attempt < attempts:
-                    continue
+            if "error" in resp and resp["error"]:
                 raise ExcelClientError(
-                    f"MCP timeout calling tool: {tool_name}",
+                    f"MCP tool returned logical error for tool={tool_name}",
                     server_id=self._cfg.server_id,
                     tool_name=tool_name,
                     args=args,
-                    cause=exc,
-                ) from exc
+                    response_body=self._stringify(resp["error"]),
+                )
 
-            except URLError as exc:
-                raise ExcelClientError(
-                    f"MCP transport error calling tool: {tool_name}",
-                    server_id=self._cfg.server_id,
-                    tool_name=tool_name,
-                    args=args,
-                    response_body=str(exc),
-                    cause=exc,
-                ) from exc
+            return resp
 
-            except ExcelClientError:
-                raise
+        except HTTPError as exc:
+            body = self._read_http_error_body(exc)
+            raise ExcelClientError(
+                f"MCP tool failed with HTTP {getattr(exc, 'code', None)} for tool={tool_name}",
+                server_id=self._cfg.server_id,
+                tool_name=tool_name,
+                args=args,
+                status_code=getattr(exc, "code", None),
+                response_body=body,
+                cause=exc,
+            ) from exc
 
-            except Exception as exc:
-                raise ExcelClientError(
-                    f"Unexpected MCP error calling tool: {tool_name}",
-                    server_id=self._cfg.server_id,
-                    tool_name=tool_name,
-                    args=args,
-                    cause=exc,
-                ) from exc
+        except (TimeoutError, socket.timeout) as exc:
+            timeout_part = (
+                f" after {self._cfg.timeout_seconds}s"
+                if self._cfg.timeout_seconds is not None
+                else ""
+            )
+            raise ExcelClientError(
+                f"MCP timeout{timeout_part} calling tool={tool_name}",
+                server_id=self._cfg.server_id,
+                tool_name=tool_name,
+                args=args,
+                cause=exc,
+            ) from exc
+
+        except URLError as exc:
+            raise ExcelClientError(
+                f"MCP transport error calling tool={tool_name}",
+                server_id=self._cfg.server_id,
+                tool_name=tool_name,
+                args=args,
+                response_body=str(exc),
+                cause=exc,
+            ) from exc
+
+        except ExcelClientError:
+            raise
+
+        except Exception as exc:
+            raise ExcelClientError(
+                f"Unexpected MCP error calling tool={tool_name}",
+                server_id=self._cfg.server_id,
+                tool_name=tool_name,
+                args=args,
+                cause=exc,
+            ) from exc
 
         if last_exc is not None:
             raise ExcelClientError(
